@@ -32,13 +32,13 @@ const BUILD_ROW: Record<string, Pos> = {
   prismatic: P(9, 12, 3, 10), synergies: P(9, 22, 3, 10),
 }
 export const DEFAULT_LAYOUTS: Record<ModeKey, Record<string, Pos>> = {
-  idle: { ...BUILD_ROW, compile: P(0, 21, 3, 6) },
-  select: { ...BUILD_ROW },
+  idle: { ...BUILD_ROW, compile: P(0, 21, 3, 6), 'aug-build': P(3, 21, 6, 12) },
+  select: { ...BUILD_ROW, 'aug-build': P(0, 21, 6, 12) },
   'game-rift': { items: P(0, 0, 3, 12), boots: P(3, 0, 3, 12), runes: P(6, 0, 3, 12), spells: P(9, 0, 3, 12) },
   'game-aram': {
-    'augment-assist': P(0, 0, 6, 10),
-    'aug-prismatic': P(0, 10, 3, 10), 'aug-gold': P(3, 10, 3, 10), 'aug-silver': P(0, 20, 3, 10),
-    items: P(6, 0, 3, 12), runes: P(9, 0, 3, 12), spells: P(6, 12, 3, 10), boots: P(9, 12, 3, 12),
+    'augment-assist': P(0, 0, 6, 14), 'aug-build': P(6, 0, 6, 12),
+    'aug-prismatic': P(0, 14, 3, 10), 'aug-gold': P(3, 14, 3, 10), 'aug-silver': P(0, 24, 3, 10),
+    items: P(6, 12, 3, 12), runes: P(9, 12, 3, 12), spells: P(6, 24, 3, 10), boots: P(9, 24, 3, 12),
   },
   'game-arena': {
     'augment-assist': P(0, 0, 6, 10),
@@ -71,28 +71,31 @@ const ARENA_BUILD: WidgetSpec[] = [
   { id: 'prismatic', title: '棱彩装备', w: 3, h: 10 },
   { id: 'synergies', title: '最佳队友', w: 3, h: 10 },
 ]
-const ASSIST: WidgetSpec = { id: 'augment-assist', title: '强化推荐', w: 6, h: 10 }
+const ASSIST: WidgetSpec = { id: 'augment-assist', title: '强化推荐', w: 6, h: 14 }
+const AUG_BUILD: WidgetSpec = { id: 'aug-build', title: '强化出装', w: 6, h: 12 }
 export const CATALOG: Record<ModeKey, WidgetSpec[]> = {
   idle: [
     ...BUILD_WIDGETS,
     ...AUG_WIDGETS.map((w) => ({ ...w, when: '大乱斗 / 斗魂竞技场出装' })),
     ...ARENA_BUILD.map((w) => ({ ...w, when: '斗魂竞技场出装' })),
     { id: 'compile', title: '出装数据统计', w: 3, h: 6 },
+    { ...AUG_BUILD, when: '大乱斗出装' },
   ],
   select: [
     ...BUILD_WIDGETS,
     ...AUG_WIDGETS.map((w) => ({ ...w, when: '大乱斗 / 斗魂竞技场' })),
     ...ARENA_BUILD.map((w) => ({ ...w, when: '斗魂竞技场' })),
+    { ...AUG_BUILD, when: '大乱斗' },
   ],
   'game-rift': [...BUILD_WIDGETS],
-  'game-aram': [ASSIST, ...BUILD_WIDGETS, ...AUG_WIDGETS.map((w) => ({ ...w, when: '海克斯乱斗' }))],
+  'game-aram': [ASSIST, AUG_BUILD, ...BUILD_WIDGETS, ...AUG_WIDGETS.map((w) => ({ ...w, when: '海克斯乱斗' }))],
   'game-arena': [ASSIST, ...BUILD_WIDGETS, ...ARENA_BUILD, ...AUG_WIDGETS],
 }
 
 const COLUMNS = 12
 const CELL = 40
 const MARGIN = 6
-const STORE = 'ezlol.layout.v5' // v5: build + augment-only layouts
+const STORE = 'ezlol.layout.v6' // v6: augment build box
 const PRESET = 'ezlol.layout.preset.v4' // user-saved arrangements, restored by Reset
 
 type Layouts = Record<string, Record<string, Pos>>

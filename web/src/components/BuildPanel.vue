@@ -16,6 +16,9 @@ const pctf = (x: number) => `${Math.round(x * 100)}%`
 const tierLabel = (t?: number) => (t ? ['', 'S', 'A', 'B', 'C', 'D'][t] ?? String(t) : '')
 const pct = (s: ItemSet, total: number) => (total ? `选取 ${Math.round((100 * s.games) / total)}%` : '')
 const RARITY_LABEL: Record<string, string> = { prismatic: '棱彩', gold: '金色', silver: '银色' }
+function togglePreview(id: number) {
+  s.augPreview = s.augPreview.includes(id) ? s.augPreview.filter((x) => x !== id) : [...s.augPreview, id].slice(-4)
+}
 </script>
 
 <template>
@@ -23,7 +26,7 @@ const RARITY_LABEL: Record<string, string> = { prismatic: '棱彩', gold: '金�
     <!-- Augments: one box per rarity -->
     <Widget v-for="r in RARITIES" :key="r" :id="'aug-' + r" :w="3" class="aug-col" :class="[r, { compact }]" v-show="build.augments?.length">
       <h2>{{ RARITY_LABEL[r] }}强化 <span class="muted" style="text-transform: none; letter-spacing: 0; margin-left: 8px">{{ build.augScope === 'champion' ? build.champion.name : '全英雄数据' }} · {{ build.mode === 'arena' ? 'op.gg + blitz' : 'aramgg' }}</span></h2>
-      <div v-for="a in augBy(build, r)" :key="a.id" class="aug" :title="a.desc">
+      <div v-for="a in augBy(build, r)" :key="a.id" class="aug" :class="{ clickable: build.mode === 'aram', sel: s.augPreview.includes(a.id) }" :title="build.mode === 'aram' ? `${a.desc}\n（点击：在「强化出装」里看选它之后怎么出装）` : a.desc" @click="build.mode === 'aram' && togglePreview(a.id)">
         <img v-if="a.icon" :src="a.icon" :alt="a.name" /><span v-else class="noicon" />
         <div class="aug-body">
           <div class="aug-name"><span class="tier-pip" :class="'t' + a.tier">{{ tierLabel(a.tier) || '?' }}</span>{{ a.name }}</div>
@@ -173,6 +176,9 @@ const RARITY_LABEL: Record<string, string> = { prismatic: '棱彩', gold: '金�
 .aug-col.silver h2 { color: var(--rarity-silver); background: linear-gradient(90deg, var(--rarity-silver-bg), transparent); }
 button.sm { padding: 4px 8px; font-size: 10px; }
 .aug { display: grid; grid-template-columns: 36px 1fr auto; gap: 8px; align-items: center; padding: 5px 6px; margin-bottom: 4px; border: 1px solid var(--line); background: var(--surface-raised); }
+.aug.clickable { cursor: pointer; }
+.aug.clickable:hover { border-color: var(--gold-deep); }
+.aug.sel { border-color: var(--hextech-2); box-shadow: inset 0 0 0 1px var(--accent-glow); }
 .aug img { width: 36px; height: 36px; border: 1px solid var(--gold-deep); background: #000; }
 .aug-body { min-width: 0; }
 .aug-name { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 6px; }

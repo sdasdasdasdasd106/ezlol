@@ -18,6 +18,10 @@ export interface BuildState {
   info: ChampionInfo | null
   applying: boolean
   expandAugs: boolean
+  /** Augments picked in the lists to preview "the build after taking these" (ARAM). */
+  augPreview: number[]
+  /** Mode of the running game (from the game itself), used when no mode is forced. */
+  autoMode: BuildMode
 }
 
 /**
@@ -37,6 +41,8 @@ export const buildState = reactive<BuildState>({
   info: null,
   applying: false,
   expandAugs: false,
+  augPreview: [],
+  autoMode: '',
 })
 
 // Requests can overlap (rapid champion switches); only the newest may write state.
@@ -44,6 +50,7 @@ let seq = 0
 
 export async function loadBuild(champion: Champion | null = buildState.champion): Promise<void> {
   const s = buildState
+  if (s.champion?.id !== champion?.id) s.augPreview = []
   s.champion = champion
   if (!champion) {
     seq++ // drop any in-flight response
@@ -60,7 +67,7 @@ export async function loadBuild(champion: Champion | null = buildState.champion)
   s.loadingChamp = champion
   s.error = ''
   try {
-    const b = await api.build(champion.key, s.role === 'NONE' ? undefined : s.role || undefined, s.mode || undefined)
+    const b = await api.build(champion.key, s.role === 'NONE' ? undefined : s.role || undefined, s.mode || s.autoMode || undefined)
     if (my !== seq) return
     s.build = b
     s.role = b.role

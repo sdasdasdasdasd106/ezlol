@@ -22,6 +22,7 @@ import (
 	"github.com/aarlint/ezlol/internal/live"
 	"github.com/aarlint/ezlol/internal/screen"
 	"github.com/aarlint/ezlol/internal/settings"
+	"github.com/aarlint/ezlol/internal/testlog"
 	"github.com/aarlint/ezlol/internal/update"
 	"github.com/aarlint/ezlol/internal/watcher"
 )
@@ -41,14 +42,15 @@ type Server struct {
 	player    playerCache
 	info      infoCache
 	ocr       *screen.Reader
+	tlog      *testlog.Logger
 	offer     offerState
 	ui        fs.FS  // built frontend, may be nil in dev
 	devProxy  string // vite dev server url, may be empty
 }
 
 // New wires a server.
-func New(log *slog.Logger, w *watcher.Watcher, dd *ddragon.Store, store *builds.Store, comp *builds.Compiler, community *builds.Community, cfg *settings.Store, upd *update.Checker, version string, ui fs.FS, devProxy string) *Server {
-	return &Server{log: log, watcher: w, dd: dd, store: store, compiler: comp, community: community, settings: cfg, update: upd, version: version, live: live.New(), ocr: screen.New(), ui: ui, devProxy: devProxy}
+func New(log *slog.Logger, w *watcher.Watcher, dd *ddragon.Store, store *builds.Store, comp *builds.Compiler, community *builds.Community, cfg *settings.Store, upd *update.Checker, tlog *testlog.Logger, version string, ui fs.FS, devProxy string) *Server {
+	return &Server{log: log, watcher: w, dd: dd, store: store, compiler: comp, community: community, settings: cfg, update: upd, tlog: tlog, version: version, live: live.New(), ocr: screen.New(), ui: ui, devProxy: devProxy}
 }
 
 // Handler builds the router.
@@ -59,6 +61,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/champions", s.champions)
 	mux.HandleFunc("GET /api/champions/{key}/build", s.build)
 	mux.HandleFunc("GET /api/game", s.game)
+	mux.HandleFunc("POST /api/game/pick", s.correctPick)
+	mux.HandleFunc("GET /api/champions/{key}/augment-build", s.augmentBuild)
+	mux.HandleFunc("POST /api/logs/open", s.openLogs)
 	mux.HandleFunc("GET /api/me/{id}", s.meChampion)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)

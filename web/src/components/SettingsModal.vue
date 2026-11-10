@@ -122,6 +122,14 @@ function download() {
   if (upd.value?.url) window.open(upd.value.url, '_blank', 'noopener,noreferrer')
 }
 
+async function openLogs() {
+  try {
+    await api.openLogs()
+  } catch (e) {
+    flash(errText(e), 'err')
+  }
+}
+
 function toggleSound() {
   soundOn.value = !soundOn.value
   sound.setEnabled(soundOn.value)
@@ -182,6 +190,42 @@ onBeforeUnmount(() => {
                 <button id="set-ocr" type="button" role="switch" class="toggle" :class="{ on: s.ocr && s.ocrAvailable }" :aria-checked="s.ocr && s.ocrAvailable" aria-labelledby="set-lbl-ocr" :disabled="!s.ocrAvailable" :title="s.ocrAvailable ? undefined : '这台电脑上用不了屏幕识别'" @click="save({ ocr: !s.ocr })">
                   <span class="track" aria-hidden="true" /><span class="state">{{ s.ocr && s.ocrAvailable ? '开' : '关' }}</span>
                 </button>
+              </dd>
+            </div>
+          </dl>
+
+          <!-- Test log -->
+          <h3>测试日志</h3>
+          <dl class="rows">
+            <div class="setting">
+              <dt>
+                <span class="lbl"><label id="set-lbl-tlog" for="set-tlog">记录测试日志</label></span>
+                <span class="desc muted">把每次识别读到的文字、匹配结果、推荐理由和记录的已选强化写进本机日志，测试完把日志发出来就能排查问题。</span>
+              </dt>
+              <dd>
+                <button id="set-tlog" type="button" role="switch" class="toggle" :class="{ on: s.testLog }" :aria-checked="s.testLog" aria-labelledby="set-lbl-tlog" @click="save({ testLog: !s.testLog })">
+                  <span class="track" aria-hidden="true" /><span class="state">{{ s.testLog ? '开' : '关' }}</span>
+                </button>
+              </dd>
+            </div>
+            <div class="setting">
+              <dt>
+                <span class="lbl"><label id="set-lbl-shots" for="set-shots">同时保存截图</label></span>
+                <span class="desc muted">识别到强化时保存当时截下的画面（只保留最近 60 张）。识别不准时打开它最有用，平时可以关掉。</span>
+              </dt>
+              <dd>
+                <button id="set-shots" type="button" role="switch" class="toggle" :class="{ on: s.logShots }" :aria-checked="s.logShots" aria-labelledby="set-lbl-shots" :disabled="!s.testLog" @click="save({ logShots: !s.logShots })">
+                  <span class="track" aria-hidden="true" /><span class="state">{{ s.logShots ? '开' : '关' }}</span>
+                </button>
+              </dd>
+            </div>
+            <div class="setting">
+              <dt>
+                <span class="lbl">日志位置</span>
+                <span class="desc muted" :title="s.logDir">{{ s.logDir }}</span>
+              </dt>
+              <dd>
+                <button type="button" @click="openLogs">打开日志文件夹</button>
               </dd>
             </div>
           </dl>

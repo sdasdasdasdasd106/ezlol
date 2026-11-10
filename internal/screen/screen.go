@@ -33,16 +33,21 @@ var ErrUnavailable = errors.New("screen ocr unavailable")
 // long-running PowerShell process using Windows OCR on Windows.
 type Reader struct {
 	mu   sync.Mutex
-	scan func(ctx context.Context) ([]byte, error) // nil = unavailable
-	lang string                                    // OCR language the helper reported, if any
+	scan func(ctx context.Context, dump string) ([]byte, error) // nil = unavailable
+	lang string                                                 // OCR language the helper reported, if any
 }
 
 // New locates the helper for this platform.
 func New() *Reader {
+	// Testing aid: EZLOL_OCR_FAKE=file.json answers every scan with that file's
+	// contents, so the whole pipeline can run without a game on screen.
+	if p := os.Getenv("EZLOL_OCR_FAKE"); p != "" {
+		return &Reader{scan: func(context.Context, string) ([]byte, error) { return os.ReadFile(p) }}
+	}
 	switch runtime.GOOS {
 	case "darwin":
 		if p := macHelper(); p != "" {
-			return &Reader{scan: func(ctx context.Context) ([]byte, error) { return runOnce(ctx, p) }}
+			return &Reader{scan: func(ctx context.Context, dump string) ([]byte, error) { return runOnce(ctx, p, dump) }}
 		}
 	case "windows":
 		if scan := windowsHelper(); scan != nil {
@@ -69,8 +74,12 @@ func macHelper() string {
 	return ""
 }
 
-func runOnce(ctx context.Context, path string) ([]byte, error) {
-	out, err := exec.CommandContext(ctx, path).Output()
+func runOnce(ctx context.Context, path, dump string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, path)
+	if dump != "" {
+		cmd.Env = append(os.Environ(), "EZLOL_OCR_DUMP="+dump)
+	}
+	out, err := cmd.Output()
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
@@ -94,7 +103,10 @@ func (r *Reader) Lang() string {
 }
 
 // Read captures the screen and returns recognized lines.
-func (r *Reader) Read(ctx context.Context) ([]Line, error) {
+func (r *Reader) Read(ctx context.Context) ([]Line, error) { return r.ReadDump(ctx, "") }
+
+// ReadDump is Read that also saves the captured image as a PNG at dump (when not "").
+func (r *Reader) ReadDump(ctx context.Context, dump string) ([]Line, error) {
 	if r.scan == nil {
 		return nil, ErrUnavailable
 	}
@@ -102,7 +114,7 @@ func (r *Reader) Read(ctx context.Context) ([]Line, error) {
 	defer r.mu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	out, err := r.scan(ctx)
+	out, err := r.scan(ctx, dump)
 	if err != nil {
 		return nil, err
 	}

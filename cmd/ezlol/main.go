@@ -23,6 +23,7 @@ import (
 	"github.com/aarlint/ezlol/internal/builds"
 	"github.com/aarlint/ezlol/internal/ddragon"
 	"github.com/aarlint/ezlol/internal/settings"
+	"github.com/aarlint/ezlol/internal/testlog"
 	"github.com/aarlint/ezlol/internal/update"
 	"github.com/aarlint/ezlol/internal/watcher"
 	"github.com/aarlint/ezlol/web"
@@ -120,6 +121,8 @@ func main() {
 	go upd.Run(ctx, 6*time.Hour, func() bool { return cfg.Get().UpdateCheck })
 
 	community := builds.NewCommunity(filepath.Join(*dataDir, "community"))
+	tlog := testlog.New(filepath.Join(*dataDir, "logs"), func() bool { return cfg.Get().TestLog }, func() bool { return cfg.Get().LogShots })
+	tlog.Log("start", map[string]any{"version": version, "os": runtime.GOOS})
 	w := watcher.New(log, time.Second, cfg)
 	go w.Run(ctx)
 
@@ -151,7 +154,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           api.New(log, w, dd, store, comp, community, cfg, upd, version, ui, *dev).Handler(),
+		Handler:           api.New(log, w, dd, store, comp, community, cfg, upd, tlog, version, ui, *dev).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	ln, err := net.Listen("tcp", *addr)

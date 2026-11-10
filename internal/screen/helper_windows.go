@@ -37,7 +37,7 @@ type psHelper struct {
 	failedAt time.Time
 }
 
-func windowsHelper() func(ctx context.Context) ([]byte, error) {
+func windowsHelper() func(ctx context.Context, dump string) ([]byte, error) {
 	exe := filepath.Join(os.Getenv("SystemRoot"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
 	if _, err := os.Stat(exe); err != nil {
 		p, err := exec.LookPath("powershell.exe")
@@ -145,7 +145,7 @@ func (h *psHelper) stop() {
 	h.cmd, h.stdin, h.lines = nil, nil, nil
 }
 
-func (h *psHelper) scan(ctx context.Context) ([]byte, error) {
+func (h *psHelper) scan(ctx context.Context, dump string) ([]byte, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.cmd == nil {
@@ -158,7 +158,11 @@ func (h *psHelper) scan(ctx context.Context) ([]byte, error) {
 		}
 		return nil, errors.New("文字识别正在启动…")
 	}
-	if _, err := io.WriteString(h.stdin, "scan\n"); err != nil {
+	cmd := "scan\n"
+	if dump != "" && !strings.ContainsAny(dump, "\r\n") {
+		cmd = "scan\t" + dump + "\n" // the helper also saves the captured image there
+	}
+	if _, err := io.WriteString(h.stdin, cmd); err != nil {
 		h.stop()
 		return nil, err
 	}

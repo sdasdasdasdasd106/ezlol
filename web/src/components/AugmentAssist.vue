@@ -1,20 +1,29 @@
 <script setup lang="ts">
-// In-game augment assistant: shows the three augments on screen (read by OCR),
-// best first, with why. Also pops a toast and chimes when an offer appears.
-import { computed, watch } from 'vue'
+// In-game augment assistant: the augments on screen (read by OCR), best first,
+// each with the numbers behind it; the augments taken so far (the recommended
+// one is assumed, one click corrects it). Pops a toast and chimes on an offer.
+import { computed, ref, watch } from 'vue'
 import Widget from './Widget.vue'
 import * as sound from '../sound'
+import { api } from '../api'
 import { dismissKey, toast } from '../toast'
-import type { Augment, Game } from '../types'
+import type { AugPick, Game, OfferCard } from '../types'
 
 const props = defineProps<{ game: Game | null }>()
+const emit = defineEmits<{ picks: [p: AugPick[]] }>()
 
 const offer = computed(() => props.game?.offer)
 const mode = computed(() => props.game?.mode ?? '')
-const pctf = (x: number) => `${Math.round(x * 100)}%`
-const tierLabel = (t?: number) => (t ? ['', 'S', 'A', 'B', 'C', 'D'][t] ?? '?' : '?')
-const statLine = (a: Augment) =>
-  a.avgPlace ? `平均名次 ${a.avgPlace.toFixed(2)} · ${a.games} 场` : a.games ? `胜率 ${pctf(a.winRate)} · ${a.games} 场 · 选取 ${pctf(a.pickRate)}` : '暂无数据'
+const picks = computed(() => props.game?.picks ?? [])
+const STAGE = ['', '开局', '7 级', '11 级', '15 级']
+const STYLE: Record<string, string> = { crit: '暴击流', on_hit: '攻速特效流', ap: '法强流', hybrid: '混伤流', lethality: '穿甲流', tank: '坦克流', bruiser: '战士流', ad: '物理流' }
+const pct = (x: number) => `${(x * 100).toFixed(1)}%`
+const signed = (x: number) => `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}%`
+const tierLabel = (t?: number) => (t ? ['', 'S', 'A', 'B', 'C', 'D'][t] ?? '?' : '')
+const statLine = (c: OfferCard) =>
+  mode.value === 'arena'
+    ? c.avgPlace ? `平均名次 ${c.avgPlace.toFixed(2)} · ${c.games} 场` : '暂无数据'
+    : c.stageGames ? `胜率 ${pct(c.stageWinRate)} · 比平均 ${signed(c.lift)} · ${c.stageGames >= 10000 ? (c.stageGames / 10000).toFixed(1) + ' 万' : c.stageGames} 场` : '暂无数据'
 
 // What the scanner is doing, in words.
 const scanNote = computed(() => {
@@ -37,19 +46,48 @@ const langWarn = computed(() => {
   return l && !l.startsWith('zh') ? `识别语言是 ${l}，认不出中文强化名：请在 Windows 设置里安装「中文(简体)」的光学字符识别，然后重启 ezlol。` : ''
 })
 
+// Correcting an assumed pick.
+const fixing = ref<number | null>(null)
+async function correct(p: AugPick, id: number) {
+  fixing.value = null
+  if (id === p.augmentId) return
+  try {
+    emit('picks', await api.correctPick(p.stage, id))
+  } catch (e) {
+    toast({ key: 'pick', kind: 'error', title: '更正失败', body: (e as Error).message })
+  }
+}
+
 let pinged = false
+let announced = 0
 watch(offer, (off) => {
   if (off?.active && off.offered?.length) {
     if (!pinged) {
       pinged = true
       sound.alert()
     }
-    toast({ key: 'offer', kind: 'pick', sticky: true, title: `选强化 · 推荐「${off.best}」`, body: off.why, cards: off.offered ?? [] })
+    toast({ key: 'offer', kind: 'pick', sticky: true, title: `选强化 · 推荐「${off.best}」`, body: [off.why, off.note].filter(Boolean).join(' '), cards: off.offered ?? [] })
   } else if (pinged) {
     pinged = false
     dismissKey('offer')
   }
 })
+// After an offer closes, say what was recorded so a wrong guess gets noticed.
+watch(
+  () => picks.value.length,
+  (n) => {
+    const p = picks.value[n - 1]
+    if (!p || n <= announced) return
+    announced = n
+    if (p.assumed) toast({ key: 'pick', kind: 'info', title: `已记为选了「${p.name}」`, body: '如果你选的是别的，在「强化推荐」面板里点它改掉，出装会跟着变。', ttl: 9000 })
+  },
+)
+watch(
+  () => props.game?.inGame,
+  (v) => {
+    if (!v) announced = 0
+  },
+)
 </script>
 
 <template>
@@ -62,15 +100,27 @@ watch(offer, (off) => {
     <div v-else-if="mode !== 'aram' && mode !== 'arena'" class="muted">召唤师峡谷没有强化，看下面的出装就好。</div>
     <template v-else>
       <div v-if="offer?.active && offer.offered?.length" class="pick">
-        <div class="take">选「{{ offer.best }}」<span class="why">{{ offer.why }}</span></div>
+        <div class="take">选「{{ offer.best }}」<span v-if="offer.stage" class="why">{{ STAGE[offer.stage] }}强化</span></div>
+        <div v-if="offer.note" class="gap">{{ offer.note }}</div>
         <div class="cards">
           <div v-for="(a, i) in offer.offered" :key="a.id" class="card" :class="[a.rarity, { best: i === 0 }]" :title="a.desc">
-            <img v-if="a.icon" :src="a.icon" :alt="a.name" /><span v-else class="noicon" />
-            <div class="body">
-              <div class="n"><span class="tp" :class="'t' + a.tier">{{ tierLabel(a.tier) }}</span>{{ a.name }}<span v-if="i === 0" class="rec">推荐</span></div>
-              <div class="s">{{ statLine(a) }}</div>
-              <div class="d">{{ a.desc }}</div>
+            <div class="head">
+              <img v-if="a.icon" :src="a.icon" :alt="a.name" /><span v-else class="noicon" />
+              <div class="body">
+                <div class="n"><span v-if="tierLabel(a.tier)" class="tp" :class="'t' + a.tier">{{ tierLabel(a.tier) }}</span>{{ a.name }}<span v-if="i === 0" class="rec">推荐</span></div>
+                <div class="s">{{ statLine(a) }}</div>
+              </div>
             </div>
+            <ul class="reasons">
+              <li v-for="(r, j) in a.reasons" :key="j" :class="{ warn: r.startsWith('注意') || r.startsWith('和你现在的装备不太搭') }">{{ r }}</li>
+            </ul>
+            <div v-if="a.core" class="core" :title="`选它之后最常见的核心出装（${STYLE[a.core.style] ?? a.core.style}）`">
+              <template v-for="(it, j) in a.core.items" :key="it.id">
+                <span v-if="j" class="arrow">›</span><img v-if="it.image" :src="it.image" :title="it.name" :alt="it.name" /><span v-else class="noimg">{{ it.name || it.id }}</span>
+              </template>
+              <img v-if="a.core.boots?.image" :src="a.core.boots.image" :title="a.core.boots.name" class="boots" />
+            </div>
+            <div class="d">{{ a.desc }}</div>
           </div>
         </div>
       </div>
@@ -80,6 +130,19 @@ watch(offer, (off) => {
       <div v-else class="muted">
         {{ mode === 'arena' ? '每轮之间出现强化选择时会自动识别。' : '开局和 7 / 11 / 15 级时会出现强化选择，到时会自动识别。' }}
       </div>
+
+      <!-- Augments taken so far; an assumed one can be corrected -->
+      <div v-if="picks.length" class="picks">
+        <span class="muted">已选：</span>
+        <span v-for="p in picks" :key="p.stage" class="chip" :class="[p.rarity, { assumed: p.assumed }]">
+          <img v-if="p.icon" :src="p.icon" alt="" />
+          <span>{{ STAGE[p.stage] }} {{ p.name }}</span>
+          <button class="sm" :title="p.assumed ? '这是按推荐自动记录的；选的不是它就点这里改' : '改成其他选项'" @click="fixing = fixing === p.stage ? null : p.stage">{{ p.assumed ? '不对？' : '改' }}</button>
+          <span v-if="fixing === p.stage" class="fix">
+            <button v-for="o in p.offered" :key="o.id" class="sm" :class="{ active: o.id === p.augmentId }" @click="correct(p, o.id)">{{ o.name }}</button>
+          </span>
+        </span>
+      </div>
       <div v-if="scanNote" class="note">{{ scanNote }}</div>
       <div v-if="langWarn" class="note">{{ langWarn }}</div>
     </template>
@@ -88,24 +151,38 @@ watch(offer, (off) => {
 
 <style scoped>
 .sub { text-transform: none; letter-spacing: 0; margin-left: 8px; }
-.take { font-family: var(--display); font-size: 18px; font-weight: 700; color: var(--hextech-2); margin-bottom: 8px; }
+.take { font-family: var(--display); font-size: 18px; font-weight: 700; color: var(--hextech-2); margin-bottom: 4px; }
 .why { font-family: inherit; font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 10px; }
+.gap { font-size: 12px; color: var(--gold-bright); margin-bottom: 8px; }
 .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 @media (max-width: 900px) { .cards { grid-template-columns: 1fr; } }
-.card { display: grid; grid-template-columns: 44px 1fr; gap: 8px; padding: 8px; border: 1px solid var(--gold-deep); background: var(--surface-raised); min-width: 0; }
+.card { padding: 8px; border: 1px solid var(--gold-deep); background: var(--surface-raised); min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .card.best { border-color: var(--hextech-2); box-shadow: inset 0 0 0 1px var(--accent-glow), 0 0 14px var(--accent-glow); }
 .card.prismatic { border-left: 3px solid var(--rarity-prismatic, #3fb4d8); }
 .card.gold { border-left: 3px solid var(--rarity-gold, var(--gold)); }
 .card.silver { border-left: 3px solid var(--rarity-silver, #8b9bb0); }
-.card img { width: 44px; height: 44px; border: 1px solid var(--gold-deep); background: #000; }
+.head { display: grid; grid-template-columns: 40px 1fr; gap: 8px; align-items: center; }
+.head img, .noicon { width: 40px; height: 40px; border: 1px solid var(--gold-deep); background: #000; }
 .body { min-width: 0; }
 .n { font-weight: 700; display: flex; align-items: center; gap: 6px; }
 .rec { margin-left: auto; font-size: 11px; color: var(--hextech-2); border: 1px solid var(--hextech-dim); padding: 0 5px; }
 .s { font-size: 12px; color: var(--muted); }
-.d { font-size: 11px; color: var(--muted); margin-top: 3px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.reasons { margin: 0; padding-left: 16px; font-size: 12px; line-height: 1.45; }
+.reasons li.warn { color: var(--red, #e84057); }
+.core { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
+.core img { width: 26px; height: 26px; border: 1px solid var(--gold-deep); background: #000; }
+.core img.boots { margin-left: 6px; }
+.core .arrow { color: var(--muted); }
+.d { font-size: 11px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .tp { font-family: var(--display); font-size: 10px; width: 16px; height: 16px; display: grid; place-items: center; border: 1px solid var(--gold-deep); color: var(--muted); }
 .tp.t1 { color: #ff8a3d; border-color: #ff8a3d; } .tp.t2 { color: var(--gold); border-color: var(--gold); } .tp.t3 { color: var(--hextech-2); border-color: var(--hextech-dim); }
 .wait { font-size: 13px; border: 1px dashed var(--gold-deep); padding: 6px 10px; color: var(--gold-bright); }
+.picks { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; }
+.chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 4px 2px 2px; border: 1px solid var(--gold-deep); background: var(--surface-raised); }
+.chip.assumed { border-style: dashed; }
+.chip img { width: 20px; height: 20px; }
+.fix { display: inline-flex; gap: 3px; }
+button.sm { padding: 2px 6px; font-size: 11px; min-height: 0; }
 .note { margin-top: 8px; font-size: 12px; }
-.noicon { width: 44px; height: 44px; border: 1px solid var(--gold-deep); background: #000; }
+.noimg { font-size: 11px; padding: 0 4px; border: 1px solid var(--gold-deep); }
 </style>

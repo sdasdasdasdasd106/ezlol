@@ -15,11 +15,13 @@ type Settings struct {
 	AutoCompile   bool   `json:"autoCompile"`
 	OCR           bool   `json:"ocr"`         // augment pick detection
 	UpdateCheck   bool   `json:"updateCheck"` // look for new releases
+	TestLog       bool   `json:"testLog"`     // write a local log of every augment scan and pick
+	LogShots      bool   `json:"logShots"`    // also save screenshots of what was scanned
 }
 
 // Defaults returns the initial configuration.
 func Defaults() Settings {
-	return Settings{Platform: "sg2", MatchesPerRun: 200, OCR: true, UpdateCheck: true}
+	return Settings{Platform: "sg2", MatchesPerRun: 200, OCR: true, UpdateCheck: true, TestLog: true}
 }
 
 // Store is a mutex-guarded settings file.
@@ -76,6 +78,6 @@ func (s Settings) Masked() map[string]any {
 	return map[string]any{
 		"riotApiKeySet": s.RiotAPIKey != "", "riotApiKeyHint": key,
 		"platform": s.Platform, "matchesPerRun": s.MatchesPerRun, "autoCompile": s.AutoCompile,
-		"ocr": s.OCR, "updateCheck": s.UpdateCheck,
+		"ocr": s.OCR, "updateCheck": s.UpdateCheck, "testLog": s.TestLog, "logShots": s.LogShots,
 	}
 }

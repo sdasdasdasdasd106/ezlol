@@ -4,4 +4,4 @@ package screen
 
 import "context"
 
-func windowsHelper() func(ctx context.Context) ([]byte, error) { return nil }
+func windowsHelper() func(ctx context.Context, dump string) ([]byte, error) { return nil }

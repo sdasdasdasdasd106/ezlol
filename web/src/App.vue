@@ -9,11 +9,13 @@ import BuildPanel from './components/BuildPanel.vue'
 import ChampionBar from './components/ChampionBar.vue'
 import CompilePanel from './components/CompilePanel.vue'
 import AugmentAssist from './components/AugmentAssist.vue'
+import AugmentBuild from './components/AugmentBuild.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import Toasts from './components/Toasts.vue'
 import ThemeMenu from './components/ThemeMenu.vue'
 import type { ThemeOption } from './components/ThemeMenu.vue'
 import { toast } from './toast'
+import { buildState, loadBuild } from './build'
 import type { UpdateInfo } from './types'
 
 const params = new URLSearchParams(location.search)
@@ -94,6 +96,18 @@ function onStatus(s: Status) {
 // In-game poll: your champion (the build follows it) and the augment offer.
 // Fast while a game runs, slow otherwise; the endpoint is local and cheap.
 let gameTimer: number | undefined
+// The running game knows its mode even when the client connection does not:
+// make the build follow it (ARAM / Arena / Rift).
+watch(
+  () => (game.value?.inGame ? game.value.mode : ''),
+  (m) => {
+    const next = m === 'aram' || m === 'arena' || m === 'sr' ? m : ''
+    if (buildState.autoMode !== next) {
+      buildState.autoMode = next
+      if (!buildState.mode) void loadBuild()
+    }
+  },
+)
 async function pollGame() {
   try {
     game.value = await api.game()
@@ -227,7 +241,8 @@ function select(c: Champion) {
     <div class="layout" :class="mode">
       <div ref="mainEl" :key="modeKey + ':' + layoutVersion" class="main grid-stack" :class="[mode, { editing }]">
         <!-- In game (ARAM / Arena): the augment assistant first, build boxes after it -->
-        <AugmentAssist v-if="mode === 'game' && (modeKey === 'game-aram' || modeKey === 'game-arena')" :game="game" />
+        <AugmentAssist v-if="mode === 'game' && (modeKey === 'game-aram' || modeKey === 'game-arena')" :game="game" @picks="(p) => game && (game.picks = p)" />
+        <AugmentBuild v-if="modeKey !== 'game-arena' && modeKey !== 'game-rift'" :game="game" />
         <BuildPanel :status="status" :compact="mode === 'game'" />
         <CompilePanel v-if="mode === 'idle'" />
         <GhostWidget v-for="g in ghosts" :key="'ghost-' + g.id" :spec="g" />

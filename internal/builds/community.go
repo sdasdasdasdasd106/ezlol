@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,6 +29,7 @@ type Community struct {
 	http *http.Client
 	mu   sync.Mutex
 	meta *augmentMeta
+	ak   aramkitCache
 }
 
 const cdragonBase = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/"
@@ -90,7 +92,7 @@ func (c *Community) fetch(ctx context.Context, name, url string, ttl time.Durati
 		}
 		return nil, fmt.Errorf("%s: status %d", url, res.StatusCode)
 	}
-	b, err := io.ReadAll(io.LimitReader(res.Body, 16<<20))
+	b, err := io.ReadAll(io.LimitReader(res.Body, 48<<20))
 	if err != nil {
 		return nil, err
 	}
@@ -344,8 +346,9 @@ func (m *augmentMeta) mergeBlitz(b []byte, loc string) {
 		names = m.namesEN
 	}
 	for _, r := range rows {
-		if r.Description != "" && m.descs[r.ID] == "" {
-			m.descs[r.ID] = stripTags(r.Description)
+		// Untranslated entries carry the string key instead ("Kiwi_TapDancer_Summary").
+		if d := stripTags(r.Description); d != "" && m.descs[r.ID] == "" && !reKey.MatchString(d) {
+			m.descs[r.ID] = d
 		}
 		if names[r.ID] == "" && r.DisplayName != "" {
 			names[r.ID] = r.DisplayName
@@ -362,27 +365,23 @@ func (m *augmentMeta) fillNames() {
 	}
 }
 
-// stripTags drops <tags> and %i:placeholder% tokens from augment descriptions.
+var (
+	reTag     = regexp.MustCompile(`<[^>]*>`)
+	reKey     = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+	reIcon    = regexp.MustCompile(`%i:[A-Za-z0-9_]+%`)
+	reCalc    = regexp.MustCompile(`@[A-Za-z0-9_.:*]+@`)
+	reSpaceCJ = regexp.MustCompile(`\s+([，。、：；！？）])`)
+)
+
+// stripTags drops <tags>, %i:icon% markers and @calc@ placeholders from augment
+// descriptions. A plain "12%" stays.
 func stripTags(s string) string {
-	var b strings.Builder
-	inTag, inVar := false, false
-	for _, r := range s {
-		switch {
-		case r == '<':
-			inTag = true
-		case r == '>':
-			inTag = false
-		case r == '%' && !inVar:
-			inVar = true
-			b.WriteString("X")
-		case r == '%' && inVar:
-			inVar = false
-		case !inTag && !inVar:
-			b.WriteRune(r)
-		}
-	}
-	out := strings.ReplaceAll(b.String(), "X?", "")
-	return strings.Join(strings.Fields(out), " ")
+	s = strings.ReplaceAll(s, "<br>", " ")
+	s = reTag.ReplaceAllString(s, "")
+	s = reIcon.ReplaceAllString(s, "")
+	s = reCalc.ReplaceAllString(s, "X")
+	s = strings.Join(strings.Fields(s), " ")
+	return reSpaceCJ.ReplaceAllString(s, "$1")
 }
 
 type aramggAugStat struct {
@@ -877,4 +876,26 @@ func (c *Community) ArenaTiers(ctx context.Context) (map[int]ArenaTier, error) {
 			AvgPlace: float64(st.TotalPlace) / float64(st.Play), Top1: float64(st.FirstPlace) / float64(st.Play)}
 	}
 	return out, nil
+}
+
+// AugmentInfo returns name, icon, rarity and description (no stats) for augment ids.
+func (c *Community) AugmentInfo(ctx context.Context, patch string, ids []int) map[int]Augment {
+	out := map[int]Augment{}
+	if len(ids) == 0 {
+		return out
+	}
+	m := c.loadMeta(ctx, patch)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, id := range ids {
+		a := Augment{ID: id, Name: m.names[id], NameEN: m.namesEN[id], Desc: m.descs[id], Rarity: m.rarity[id], Icon: m.icons[id]}
+		if a.Name == "" {
+			a.Name = "强化 #" + strconv.Itoa(id)
+		}
+		if a.Rarity == "" {
+			a.Rarity = "unknown"
+		}
+		out[id] = a
+	}
+	return out
 }

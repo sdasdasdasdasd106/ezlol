@@ -3,6 +3,7 @@
 # (Windows.Media.Ocr, Simplified Chinese when installed) and answers with one
 # JSON line: {"width":..,"height":..,"lang":"zh-Hans-CN","lines":[{text,conf,x,y,w}]}
 # with x/y/w normalised to the game window (0..1, top-left origin).
+# "scan<TAB>C:\path\shot.png" also saves the captured image there (test logs).
 # Errors are reported as {"error":"..."}. "quit" or end of input exits.
 
 $ErrorActionPreference = 'Stop'
@@ -76,7 +77,7 @@ function Get-GameRect {
     return [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 }
 
-function Scan {
+function Scan([string]$dump) {
     $full = Get-GameRect
     # Augment cards sit in the middle of the screen: crop to that band (less to
     # read, no chat box), then map positions back to the full window.
@@ -93,6 +94,10 @@ function Scan {
         $scale = [Math]::Min($maxDim / $cw, $maxDim / $ch)
         $small = New-Object System.Drawing.Bitmap $bmp, ([int]($cw * $scale)), ([int]($ch * $scale))
         $bmp.Dispose(); $bmp = $small
+    }
+
+    if ($dump) {
+        try { $bmp.Save($dump, [System.Drawing.Imaging.ImageFormat]::Png) } catch { }
     }
 
     $ms = New-Object System.IO.MemoryStream
@@ -152,5 +157,7 @@ Emit @{ ready = $true; lang = $langTag }
 while ($true) {
     $cmd = [Console]::In.ReadLine()
     if ($null -eq $cmd -or $cmd -eq 'quit') { break }
-    try { Emit (Scan) } catch { Emit @{ error = $_.Exception.Message } }
+    $dump = ''
+    if ($cmd.StartsWith("scan`t")) { $dump = $cmd.Substring(5) }
+    try { Emit (Scan $dump) } catch { Emit @{ error = $_.Exception.Message } }
 }

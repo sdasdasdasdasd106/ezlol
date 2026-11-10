@@ -17,6 +17,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	m := s.settings.Get().Masked()
 	m["ocrAvailable"] = s.ocr.Available()
 	m["ocrLang"] = s.ocr.Lang()
+	m["logDir"] = s.tlog.Dir()
 	m["version"] = s.version
 	writeJSON(w, 200, m)
 }
@@ -31,6 +32,8 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		AutoCompile   *bool   `json:"autoCompile"`
 		OCR           *bool   `json:"ocr"`
 		UpdateCheck   *bool   `json:"updateCheck"`
+		TestLog       *bool   `json:"testLog"`
+		LogShots      *bool   `json:"logShots"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
 		writeErr(w, 400, "请求格式不对")
@@ -70,6 +73,12 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.UpdateCheck != nil {
 			st.UpdateCheck = *body.UpdateCheck
+		}
+		if body.TestLog != nil {
+			st.TestLog = *body.TestLog
+		}
+		if body.LogShots != nil {
+			st.LogShots = *body.LogShots
 		}
 	})
 	if err != nil {

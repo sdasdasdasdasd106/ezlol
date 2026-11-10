@@ -144,13 +144,69 @@ export interface BuildsStatus {
   patches: { patch: string; matches: number; champions: number }[] | null
 }
 
+/** One augment on the selection screen, with why it ranks where it does. */
+export interface OfferCard extends Augment {
+  score: number
+  stageWinRate: number
+  stageGames: number
+  lift: number
+  pairWinRate?: number
+  pairGames?: number
+  pairWith?: string
+  fit?: number
+  fitOk: boolean
+  core?: AugCore
+  reasons: string[]
+}
+
 export interface AugmentOffer {
   active: boolean
   pending: boolean
   level: number
-  offered: Augment[] | null
+  stage: number
+  offered: OfferCard[] | null
   best?: string
   why?: string
+  note?: string
+  source?: string
+}
+
+/** An augment taken this game; assumed = the recommended one was guessed. */
+export interface AugPick {
+  stage: number
+  level: number
+  augmentId: number
+  name: string
+  icon: string
+  rarity: string
+  assumed: boolean
+  offered: Augment[]
+}
+
+export interface AugItem {
+  item: ItemRef
+  winRate: number
+  games: number
+  lift: number
+}
+
+export interface AugCore {
+  style: string
+  items: ItemRef[]
+  boots?: ItemRef
+  winRate: number
+  games: number
+  pickRate: number
+  owned: number
+  augment: number
+}
+
+/** GET /api/champions/{key}/augment-build */
+export interface AugBuildResponse {
+  plan: { augments: number[]; games: number; slot: number; slotBase: number; next: AugItem[] | null; cores: AugCore[] | null; source: string }
+  augments: Augment[]
+  championWinRate: number
+  version: string
 }
 
 export interface Mastery {
@@ -181,6 +237,9 @@ export interface SettingsView {
   ocrAvailable: boolean
   ocrLang: string
   updateCheck: boolean
+  testLog: boolean
+  logShots: boolean
+  logDir: string
   version: string
 }
 export interface UpdateInfo {
@@ -199,7 +258,9 @@ export interface Game {
   gameTime: number
   mapId: number
   mode: 'aram' | 'arena' | 'sr' | ''
-  me?: { name: string; champion: Champion; team: string; isDead: boolean; level: number }
+  me?: { name: string; champion: Champion; team: string; isDead: boolean; level: number; items: number[] | null }
+  patch: string
+  picks: AugPick[] | null
   offer?: AugmentOffer
   ocr: string
   ocrLang: string

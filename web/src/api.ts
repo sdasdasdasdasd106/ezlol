@@ -1,4 +1,4 @@
-import type { Build, BuildsStatus, RunePage, Champion, ChampionInfo, Game, Mastery, PlayRecord, SettingsView, Status, UpdateInfo } from './types'
+import type { AugBuildResponse, AugPick, Build, BuildsStatus, RunePage, Champion, ChampionInfo, Game, Mastery, PlayRecord, SettingsView, Status, UpdateInfo } from './types'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...init })
@@ -21,6 +21,10 @@ export const api = {
   compile: (queue: 'ranked' | 'aram') => req<unknown>(`/api/builds/compile?queue=${queue}`, { method: 'POST' }),
   compileStop: () => req<unknown>('/api/builds/compile/stop', { method: 'POST' }),
   game: () => req<Game>('/api/game'),
+  correctPick: (stage: number, augmentId: number) => req<AugPick[]>('/api/game/pick', { method: 'POST', body: JSON.stringify({ stage, augmentId }) }),
+  augmentBuild: (champion: number, augments: number[], owned: number[]) =>
+    req<AugBuildResponse>(`/api/champions/${champion}/augment-build?augments=${augments.join(',')}&owned=${owned.join(',')}`),
+  openLogs: () => req<{ dir: string }>('/api/logs/open', { method: 'POST' }),
   info: (key: string) => req<{ champion: Champion; info?: ChampionInfo }>(`/api/champions/${encodeURIComponent(key)}/info`),
   settings: () => req<SettingsView>('/api/settings'),
   saveSettings: (patch: Record<string, unknown>) => req<SettingsView>('/api/settings', { method: 'PUT', body: JSON.stringify(patch) }),
