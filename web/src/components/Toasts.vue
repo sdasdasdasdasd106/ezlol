@@ -18,7 +18,7 @@ const tierLabel = (t: number) => ['', 'S', 'A', 'B', 'C', 'D'][t] ?? '?'
             <div class="ic"><img v-if="a.icon" :src="a.icon" :alt="a.name" /></div>
             <div class="cb">
               <div class="n"><span class="tp" :class="'t' + a.tier">{{ tierLabel(a.tier) }}</span>{{ a.name }}</div>
-              <div class="s">{{ a.avgPlace ? `平均名次 ${a.avgPlace.toFixed(2)} · ${a.games} 场` : a.games ? `胜率 ${pctf(a.winRate)} · ${a.games} 场 · 选取 ${pctf(a.pickRate)}` : '暂无数据' }}</div>
+              <div class="s">{{ a.games ? `胜率 ${pctf(a.winRate)} · ${a.games} 场 · 选取 ${pctf(a.pickRate)}` : '暂无数据' }}</div>
               <div class="d">{{ a.desc }}</div>
             </div>
           </div>

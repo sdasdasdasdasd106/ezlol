@@ -35,6 +35,10 @@ type psHelper struct {
 	starting bool
 	lastErr  error
 	failedAt time.Time
+
+	dda     *ddaCapturer
+	ddaOff  bool // Desktop Duplication failed to start: GDI only
+	tmpPath string
 }
 
 func windowsHelper() func(ctx context.Context, dump string) ([]byte, error) {
@@ -65,7 +69,7 @@ func windowsHelper() func(ctx context.Context, dump string) ([]byte, error) {
 			}
 		}
 	}
-	h := &psHelper{exe: exe, script: script}
+	h := &psHelper{exe: exe, script: script, dda: newDDA(), tmpPath: filepath.Join(filepath.Dir(script), "ezlol-frame.png")}
 	return h.scan
 }
 
@@ -158,9 +162,14 @@ func (h *psHelper) scan(ctx context.Context, dump string) ([]byte, error) {
 		}
 		return nil, errors.New("文字识别正在启动…")
 	}
-	cmd := "scan\n"
-	if dump != "" && !strings.ContainsAny(dump, "\r\n") {
-		cmd = "scan\t" + dump + "\n" // the helper also saves the captured image there
+	if strings.ContainsAny(dump, "\t\r\n") {
+		dump = ""
+	}
+	// Desktop Duplication first (sees fullscreen games); GDI if it fails or
+	// gives a black frame.
+	cmd, note := h.ddaCommand(dump)
+	if cmd == "" {
+		cmd = "scan\t" + dump + "\t" + note + "\n"
 	}
 	if _, err := io.WriteString(h.stdin, cmd); err != nil {
 		h.stop()
@@ -202,4 +211,33 @@ func (l *limited) String() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return strings.TrimSpace(l.buf.String())
+}
+
+// ddaCommand captures the game window with Desktop Duplication, crops it to the
+// middle band where augment cards appear, saves it as PNG and returns the
+// helper command to OCR it. On failure it returns "" and why.
+func (h *psHelper) ddaCommand(dump string) (cmd, note string) {
+	if h.ddaOff {
+		return "", "dda-off"
+	}
+	target, _ := gameRect()
+	img, area, err := h.dda.capture(target, 3*time.Second)
+	if err != nil {
+		if strings.Contains(err.Error(), "d3d11 device") || strings.Contains(err.Error(), "no output") {
+			h.ddaOff = true // will not work on this machine (e.g. remote desktop)
+		}
+		return "", "dda-error: " + err.Error()
+	}
+	if IsBlack(img) {
+		return "", "dda-black"
+	}
+	band, cx, cy := OfferBand(img)
+	path := dump
+	if path == "" {
+		path = h.tmpPath
+	}
+	if err := writePNG(path, band); err != nil {
+		return "", "dda-save: " + err.Error()
+	}
+	return fmt.Sprintf("file\t%s\t%d\t%d\t%d\t%d\tdda\n", path, cx, cy, area.Dx(), area.Dy()), ""
 }

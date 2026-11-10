@@ -32,9 +32,21 @@ var ErrUnavailable = errors.New("screen ocr unavailable")
 // Reader runs the OCR helper: a one-shot binary on macOS (tools/ocr), a
 // long-running PowerShell process using Windows OCR on Windows.
 type Reader struct {
-	mu   sync.Mutex
-	scan func(ctx context.Context, dump string) ([]byte, error) // nil = unavailable
-	lang string                                                 // OCR language the helper reported, if any
+	mu      sync.Mutex
+	scan    func(ctx context.Context, dump string) ([]byte, error) // nil = unavailable
+	lang    string                                                 // OCR language the helper reported, if any
+	capture string                                                 // how the last frame was captured: dda | gdi (why)
+}
+
+// ErrBlack means the captured frame was black: the game is probably in
+// exclusive fullscreen and the screen cannot be read.
+var ErrBlack = errors.New("截到的是黑屏：这台电脑在全屏模式下截不到游戏画面，请检查「全屏优化」或改用无边框模式")
+
+// Capture says how the last frame was captured ("dda", or "gdi (reason)").
+func (r *Reader) Capture() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.capture
 }
 
 // New locates the helper for this platform.
@@ -119,18 +131,24 @@ func (r *Reader) ReadDump(ctx context.Context, dump string) ([]Line, error) {
 		return nil, err
 	}
 	var res struct {
-		Lines []Line `json:"lines"`
-		Lang  string `json:"lang"`
-		Error string `json:"error"`
+		Lines   []Line `json:"lines"`
+		Lang    string `json:"lang"`
+		Error   string `json:"error"`
+		Capture string `json:"capture"`
+		Black   bool   `json:"black"`
 	}
 	if err := json.Unmarshal(out, &res); err != nil {
 		return nil, err
 	}
+	r.capture = res.Capture
 	if res.Error != "" {
 		return nil, errors.New(res.Error)
 	}
 	if res.Lang != "" {
 		r.lang = res.Lang
+	}
+	if res.Black {
+		return nil, ErrBlack
 	}
 	return res.Lines, nil
 }

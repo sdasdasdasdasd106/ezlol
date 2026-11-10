@@ -21,9 +21,7 @@ const pct = (x: number) => `${(x * 100).toFixed(1)}%`
 const signed = (x: number) => `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}%`
 const tierLabel = (t?: number) => (t ? ['', 'S', 'A', 'B', 'C', 'D'][t] ?? '?' : '')
 const statLine = (c: OfferCard) =>
-  mode.value === 'arena'
-    ? c.avgPlace ? `平均名次 ${c.avgPlace.toFixed(2)} · ${c.games} 场` : '暂无数据'
-    : c.stageGames ? `胜率 ${pct(c.stageWinRate)} · 比平均 ${signed(c.lift)} · ${c.stageGames >= 10000 ? (c.stageGames / 10000).toFixed(1) + ' 万' : c.stageGames} 场` : '暂无数据'
+  c.stageGames ? `胜率 ${pct(c.stageWinRate)} · 比平均 ${signed(c.lift)} · ${c.stageGames >= 10000 ? (c.stageGames / 10000).toFixed(1) + ' 万' : c.stageGames} 场` : '暂无数据'
 
 // What the scanner is doing, in words.
 const scanNote = computed(() => {
@@ -95,9 +93,9 @@ watch(
     <h2>强化推荐 <span v-if="game?.me" class="muted sub">{{ game.me.champion.name }} · {{ game.me.level }} 级</span></h2>
 
     <div v-if="!game?.inGame" class="muted">
-      进入大乱斗（海克斯乱斗）或斗魂竞技场后，这里会自动识别屏幕上的强化选项并告诉你选哪个。
+      进入海克斯乱斗后，这里会自动识别屏幕上的强化选项并告诉你选哪个。
     </div>
-    <div v-else-if="mode !== 'aram' && mode !== 'arena'" class="muted">召唤师峡谷没有强化，看下面的出装就好。</div>
+    <div v-else-if="mode !== 'aram'" class="muted">这不是海克斯乱斗对局，没有强化可选。</div>
     <template v-else>
       <div v-if="offer?.active && offer.offered?.length" class="pick">
         <div class="take">选「{{ offer.best }}」<span v-if="offer.stage" class="why">{{ STAGE[offer.stage] }}强化</span></div>
@@ -128,7 +126,7 @@ watch(
         {{ offer.level <= 1 ? '开局' : `${offer.level} 级` }}的强化待选——打开选择界面后会自动识别。
       </div>
       <div v-else class="muted">
-        {{ mode === 'arena' ? '每轮之间出现强化选择时会自动识别。' : '开局和 7 / 11 / 15 级时会出现强化选择，到时会自动识别。' }}
+        开局和 7 / 11 / 15 级时会出现强化选择，到时会自动识别。
       </div>
 
       <!-- Augments taken so far; an assumed one can be corrected -->

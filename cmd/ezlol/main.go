@@ -1,4 +1,4 @@
-// Command ezlol runs the queue watcher, build service and web UI.
+// Command ezlol runs the ARAM Mayhem build and augment assistant and its web UI.
 package main
 
 import (
@@ -15,7 +15,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"syscall"
 	"time"
 
@@ -49,11 +48,8 @@ func main() {
 
 	addr := flag.String("addr", env("EZLOL_ADDR", "127.0.0.1:7331"), "listen address (loopback only by default)")
 	dataDir := flag.String("data", env("EZLOL_DATA_DIR", defaultData), "data directory")
-	platform := flag.String("platform", env("EZLOL_PLATFORM", "sg2"), "Riot platform for build compilation (sg2, ph2, th2, tw2, vn2, ...)")
-	matches := flag.Int("matches", envInt("EZLOL_MATCHES_PER_RUN", 200), "new matches per compile run")
 	dev := flag.String("dev", env("EZLOL_DEV", ""), "proxy UI to a Vite dev server, e.g. http://localhost:5173")
 	noOpen := flag.Bool("no-open", os.Getenv("EZLOL_NO_OPEN") != "", "do not open the browser on start")
-	autoCompile := flag.Bool("auto-compile", os.Getenv("EZLOL_AUTO_COMPILE") != "", "start a compile run on boot when a key is set")
 	debug := flag.Bool("debug", os.Getenv("EZLOL_DEBUG") != "", "debug logging")
 	flag.Parse()
 
@@ -79,43 +75,7 @@ func main() {
 	log.Info("ezlol", "version", version)
 	log.Info("data dragon loaded", "version", dd.Data().Version, "champions", len(dd.Data().Champions))
 
-	// Settings file: UI-managed values; env vars / flags override for this run only.
 	cfg := settings.Load(filepath.Join(*dataDir, "settings.json"))
-	if k := os.Getenv("RIOT_API_KEY"); k != "" {
-		_ = cfg.Update(func(s *settings.Settings) { s.RiotAPIKey = k })
-	}
-	if os.Getenv("EZLOL_PLATFORM") != "" {
-		_ = cfg.Update(func(s *settings.Settings) { s.Platform = *platform })
-	}
-	if os.Getenv("EZLOL_MATCHES_PER_RUN") != "" {
-		_ = cfg.Update(func(s *settings.Settings) { s.MatchesPerRun = *matches })
-	}
-	if *autoCompile {
-		_ = cfg.Update(func(s *settings.Settings) { s.AutoCompile = true })
-	}
-
-	store, err := builds.NewStore(filepath.Join(*dataDir, "builds"))
-	if err != nil {
-		log.Error("build store", "err", err)
-		os.Exit(1)
-	}
-	sc := cfg.Get()
-	comp := builds.NewCompiler(builds.CompilerConfig{
-		APIKey:        sc.RiotAPIKey,
-		Platform:      sc.Platform,
-		MatchesPerRun: sc.MatchesPerRun,
-		Timeline:      true,
-	}, store, dd, log)
-	if comp.HasKey() {
-		log.Info("riot api key present; ranked build compilation enabled", "platform", sc.Platform)
-		if sc.AutoCompile {
-			if err := comp.Start(ctx, 0); err != nil {
-				log.Warn("auto compile", "err", err)
-			}
-		}
-	} else {
-		log.Info("no Riot API key; ranked compile disabled (set it in Settings). ARAM builds and runes need no key.")
-	}
 
 	upd := update.New(repo, version)
 	go upd.Run(ctx, 6*time.Hour, func() bool { return cfg.Get().UpdateCheck })
@@ -154,7 +114,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           api.New(log, w, dd, store, comp, community, cfg, upd, tlog, version, ui, *dev).Handler(),
+		Handler:           api.New(log, w, dd, community, cfg, upd, tlog, version, ui, *dev).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	ln, err := net.Listen("tcp", *addr)
@@ -172,24 +132,13 @@ func main() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		comp.Stop()
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error("serve", "err", err)
 		os.Exit(1)
 	}
-	if err := store.Save(); err != nil {
-		log.Error("save builds", "err", err)
-	}
 	fmt.Fprintln(os.Stderr, "bye")
-}
-
-func envInt(key string, def int) int {
-	if v, err := strconv.Atoi(os.Getenv(key)); err == nil {
-		return v
-	}
-	return def
 }
 
 func openBrowser(url string) {

@@ -16,35 +16,27 @@ export interface Dashboard {
 export const DASH_KEY: InjectionKey<Dashboard> = Symbol('dashboard')
 
 
-/** Screens: idle (lobby/post-game), select (champ select), and in-game per mode. */
-export type ModeKey = 'idle' | 'select' | 'game-rift' | 'game-aram' | 'game-arena'
+/** Screens: idle (lobby), select (champion select), game (in an ARAM Mayhem game). */
+export type ModeKey = 'idle' | 'select' | 'game'
 
 type Pos = { x: number; y: number; w: number; h: number }
 const P = (x: number, y: number, w: number, h: number): Pos => ({ x, y, w, h })
 
 /**
  * Built-in arrangements (12-column grid, rows of 40px). The champion card is a
- * fixed bar above the grid, not a box. Boxes that never coexist may share a slot.
+ * fixed bar above the grid, not a box.
  */
-const BUILD_ROW: Record<string, Pos> = {
-  items: P(0, 0, 3, 12), boots: P(3, 0, 3, 12), runes: P(6, 0, 3, 12), spells: P(9, 0, 3, 12),
-  'aug-prismatic': P(0, 12, 3, 9), 'aug-gold': P(3, 12, 3, 9), 'aug-silver': P(6, 12, 3, 9),
-  prismatic: P(9, 12, 3, 10), synergies: P(9, 22, 3, 10),
+const LOBBY: Record<string, Pos> = {
+  items: P(0, 0, 3, 12), boots: P(3, 0, 3, 12), 'aug-build': P(6, 0, 6, 12),
+  'aug-prismatic': P(0, 12, 4, 10), 'aug-gold': P(4, 12, 4, 10), 'aug-silver': P(8, 12, 4, 10),
 }
 export const DEFAULT_LAYOUTS: Record<ModeKey, Record<string, Pos>> = {
-  idle: { ...BUILD_ROW, compile: P(0, 21, 3, 6), 'aug-build': P(3, 21, 6, 12) },
-  select: { ...BUILD_ROW, 'aug-build': P(0, 21, 6, 12) },
-  'game-rift': { items: P(0, 0, 3, 12), boots: P(3, 0, 3, 12), runes: P(6, 0, 3, 12), spells: P(9, 0, 3, 12) },
-  'game-aram': {
-    'augment-assist': P(0, 0, 6, 14), 'aug-build': P(6, 0, 6, 12),
-    'aug-prismatic': P(0, 14, 3, 10), 'aug-gold': P(3, 14, 3, 10), 'aug-silver': P(0, 24, 3, 10),
-    items: P(6, 12, 3, 12), runes: P(9, 12, 3, 12), spells: P(6, 24, 3, 10), boots: P(9, 24, 3, 12),
-  },
-  'game-arena': {
-    'augment-assist': P(0, 0, 6, 10),
-    'aug-prismatic': P(0, 10, 3, 10), 'aug-gold': P(3, 10, 3, 10), 'aug-silver': P(0, 20, 3, 10),
-    prismatic: P(6, 0, 3, 10), synergies: P(9, 0, 3, 10), items: P(6, 10, 3, 12), boots: P(9, 10, 3, 12),
-    spells: P(3, 20, 3, 10), runes: P(6, 22, 3, 10),
+  idle: LOBBY,
+  select: LOBBY,
+  game: {
+    'augment-assist': P(0, 0, 6, 14), 'aug-build': P(6, 0, 6, 14),
+    items: P(0, 14, 3, 12), boots: P(3, 14, 3, 12),
+    'aug-prismatic': P(6, 14, 3, 10), 'aug-gold': P(9, 14, 3, 10), 'aug-silver': P(6, 24, 3, 10),
   },
 }
 
@@ -56,47 +48,25 @@ export interface WidgetSpec {
   h: number
   when?: string
 }
-const BUILD_WIDGETS: WidgetSpec[] = [
+const COMMON: WidgetSpec[] = [
   { id: 'items', title: '出装', w: 3, h: 12 },
   { id: 'boots', title: '鞋子与后期装', w: 3, h: 12 },
-  { id: 'runes', title: '符文', w: 3, h: 10 },
-  { id: 'spells', title: '召唤师技能与加点', w: 3, h: 10 },
+  { id: 'aug-build', title: '强化出装', w: 6, h: 12 },
+  { id: 'aug-prismatic', title: '棱彩强化', w: 3, h: 10 },
+  { id: 'aug-gold', title: '金色强化', w: 3, h: 10 },
+  { id: 'aug-silver', title: '银色强化', w: 3, h: 10 },
 ]
-const AUG_WIDGETS: WidgetSpec[] = [
-  { id: 'aug-prismatic', title: '棱彩强化', w: 3, h: 9 },
-  { id: 'aug-gold', title: '金色强化', w: 3, h: 9 },
-  { id: 'aug-silver', title: '银色强化', w: 3, h: 9 },
-]
-const ARENA_BUILD: WidgetSpec[] = [
-  { id: 'prismatic', title: '棱彩装备', w: 3, h: 10 },
-  { id: 'synergies', title: '最佳队友', w: 3, h: 10 },
-]
-const ASSIST: WidgetSpec = { id: 'augment-assist', title: '强化推荐', w: 6, h: 14 }
-const AUG_BUILD: WidgetSpec = { id: 'aug-build', title: '强化出装', w: 6, h: 12 }
 export const CATALOG: Record<ModeKey, WidgetSpec[]> = {
-  idle: [
-    ...BUILD_WIDGETS,
-    ...AUG_WIDGETS.map((w) => ({ ...w, when: '大乱斗 / 斗魂竞技场出装' })),
-    ...ARENA_BUILD.map((w) => ({ ...w, when: '斗魂竞技场出装' })),
-    { id: 'compile', title: '出装数据统计', w: 3, h: 6 },
-    { ...AUG_BUILD, when: '大乱斗出装' },
-  ],
-  select: [
-    ...BUILD_WIDGETS,
-    ...AUG_WIDGETS.map((w) => ({ ...w, when: '大乱斗 / 斗魂竞技场' })),
-    ...ARENA_BUILD.map((w) => ({ ...w, when: '斗魂竞技场' })),
-    { ...AUG_BUILD, when: '大乱斗' },
-  ],
-  'game-rift': [...BUILD_WIDGETS],
-  'game-aram': [ASSIST, AUG_BUILD, ...BUILD_WIDGETS, ...AUG_WIDGETS.map((w) => ({ ...w, when: '海克斯乱斗' }))],
-  'game-arena': [ASSIST, ...BUILD_WIDGETS, ...ARENA_BUILD, ...AUG_WIDGETS],
+  idle: COMMON,
+  select: COMMON,
+  game: [{ id: 'augment-assist', title: '强化推荐', w: 6, h: 14 }, ...COMMON],
 }
 
 const COLUMNS = 12
 const CELL = 40
 const MARGIN = 6
-const STORE = 'ezlol.layout.v6' // v6: augment build box
-const PRESET = 'ezlol.layout.preset.v4' // user-saved arrangements, restored by Reset
+const STORE = 'ezlol.layout.v7' // v7: ARAM Mayhem only
+const PRESET = 'ezlol.layout.preset.v5' // user-saved arrangements, restored by Reset
 
 type Layouts = Record<string, Record<string, Pos>>
 

@@ -1,27 +1,19 @@
 import { reactive } from 'vue'
 import { api } from './api'
 import { toast } from './toast'
-import type { Build, Champion, ChampionInfo, Mastery, PlayRecord, RunePage } from './types'
-
-/** '' = follow the client's current queue; otherwise the build mode is forced. */
-export type BuildMode = '' | 'sr' | 'aram' | 'arena'
+import type { Build, Champion, ChampionInfo, Mastery, PlayRecord } from './types'
 
 export interface BuildState {
   champion: Champion | null
   build: Build | null
-  role: string
-  mode: BuildMode
   loading: boolean
   loadingChamp: Champion | null
   error: string
   me: { mastery: Mastery | null; record: PlayRecord | null } | null
   info: ChampionInfo | null
-  applying: boolean
   expandAugs: boolean
-  /** Augments picked in the lists to preview "the build after taking these" (ARAM). */
+  /** Augments picked in the lists to preview "the build after taking these". */
   augPreview: number[]
-  /** Mode of the running game (from the game itself), used when no mode is forced. */
-  autoMode: BuildMode
 }
 
 /**
@@ -32,17 +24,13 @@ export interface BuildState {
 export const buildState = reactive<BuildState>({
   champion: null,
   build: null,
-  role: '',
-  mode: '',
   loading: false,
   loadingChamp: null,
   error: '',
   me: null,
   info: null,
-  applying: false,
   expandAugs: false,
   augPreview: [],
-  autoMode: '',
 })
 
 // Requests can overlap (rapid champion switches); only the newest may write state.
@@ -67,12 +55,11 @@ export async function loadBuild(champion: Champion | null = buildState.champion)
   s.loadingChamp = champion
   s.error = ''
   try {
-    const b = await api.build(champion.key, s.role === 'NONE' ? undefined : s.role || undefined, s.mode || s.autoMode || undefined)
+    const b = await api.build(champion.key)
     if (my !== seq) return
     s.build = b
-    s.role = b.role
     api
-      .me(champion.id, b.mode)
+      .me(champion.id)
       .then((m) => {
         if (my === seq) s.me = m
       })
@@ -99,31 +86,5 @@ export async function loadBuild(champion: Champion | null = buildState.champion)
     toast({ key: 'build', kind: 'error', title: '获取出装失败', body: s.error })
   } finally {
     if (my === seq) s.loading = false
-  }
-}
-
-export function pickRole(r: string): void {
-  buildState.role = r
-  void loadBuild()
-}
-
-export function pickMode(m: BuildMode): void {
-  buildState.mode = m
-  // Lane only means something on the Rift; drop ARAM's "NONE" and let the server pick.
-  if (m !== 'sr' || buildState.role === 'NONE') buildState.role = ''
-  void loadBuild()
-}
-
-export async function applyRunes(p: RunePage): Promise<void> {
-  const s = buildState
-  if (!s.build) return
-  s.applying = true
-  try {
-    await api.applyRunes(s.build.champion.id, p)
-    toast({ key: 'runes', kind: 'success', title: '符文已设置', body: `${s.build.champion.name}：${p.primary.name} + ${p.secondary.name}，已在客户端中选中。` })
-  } catch (e) {
-    toast({ key: 'runes', kind: 'error', title: '设置符文失败', body: (e as Error).message })
-  } finally {
-    s.applying = false
   }
 }

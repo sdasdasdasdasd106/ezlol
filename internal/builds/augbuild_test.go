@@ -148,3 +148,9 @@ func TestSlotBaseline(t *testing.T) {
 		t.Fatalf("lift: %+v", plan.Next[0])
 	}
 }
+
+func TestStripTagsChineseQuestionMark(t *testing.T) {
+	if got := stripTags("获得?攻击距离，如果你是远程英雄。"); got != "获得攻击距离，如果你是远程英雄。" {
+		t.Fatalf("got %q", got)
+	}
+}

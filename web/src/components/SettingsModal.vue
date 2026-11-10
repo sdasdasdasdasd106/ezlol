@@ -2,32 +2,23 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from '../api'
 import type { SettingsView, UpdateInfo } from '../types'
-import type { AppSettings } from '../api'
+import type { AppSettings, Hotkeys, OverlayPos } from '../api'
 import * as sound from '../sound'
 
 const emit = defineEmits<{ close: [] }>()
 
 const s = ref<SettingsView | null>(null)
 const upd = ref<UpdateInfo | null>(null)
-const key = ref('')
 const msg = ref('')
 const msgKind = ref<'ok' | 'err'>('ok')
 const busy = ref(false)
 const loadError = ref('')
 const soundOn = ref(sound.enabled())
-const PLATFORMS = [
-  { id: 'sg2', label: 'sg2 · 新加坡 / 马来西亚 / 印尼' },
-  { id: 'ph2', label: 'ph2 · 菲律宾' },
-  { id: 'th2', label: 'th2 · 泰国' },
-  { id: 'tw2', label: 'tw2 · 台湾 / 港澳' },
-  { id: 'vn2', label: 'vn2 · 越南' },
-  { id: 'oc1', label: 'oc1 · 大洋洲' },
-]
 const dialog = ref<HTMLElement | null>(null)
 // Desktop-only settings live in the Electron shell; absent in a plain browser.
 const desktop = !!window.ezlol?.getAppSettings
 const appS = ref<AppSettings | null>(null)
-async function saveApp(patch: Partial<Pick<AppSettings, 'launchAtLogin' | 'startInTray'>>) {
+async function saveApp(patch: Partial<Pick<AppSettings, 'launchAtLogin' | 'startInTray' | 'overlay' | 'overlayPos' | 'hotkeys'>>) {
   if (!window.ezlol?.setAppSettings) return
   busy.value = true
   try {
@@ -40,6 +31,31 @@ async function saveApp(patch: Partial<Pick<AppSettings, 'launchAtLogin' | 'start
   }
 }
 if (desktop) window.ezlol?.onAppSettings?.((v) => (appS.value = v))
+const POSITIONS: { id: OverlayPos; label: string }[] = [
+  { id: 'bottom-left', label: '左下角' },
+  { id: 'left-middle', label: '左侧中间' },
+  { id: 'top-left', label: '左上角' },
+  { id: 'top-right', label: '右上角' },
+  { id: 'bottom-right', label: '右下角' },
+]
+const HOTKEY_ROWS: { key: keyof Hotkeys; label: string }[] = [
+  { key: 'pick1', label: '标记选了第 1 个' },
+  { key: 'pick2', label: '标记选了第 2 个' },
+  { key: 'pick3', label: '标记选了第 3 个' },
+  { key: 'toggle', label: '显示 / 隐藏小窗' },
+]
+const prettyKey = (k: string) => k.replace('CommandOrControl', 'Ctrl')
+const hkDraft = ref<Partial<Hotkeys>>({})
+function saveHotkey(k: keyof Hotkeys) {
+  const raw = (hkDraft.value[k] ?? '').trim().replace(/\s+/g, '').replace(/^Ctrl\+/i, 'CommandOrControl+').replace(/\+Ctrl\+/i, '+CommandOrControl+')
+  if (!appS.value || !raw) return
+  void saveApp({ hotkeys: { ...appS.value.hotkeys, [k]: raw } })
+  hkDraft.value[k] = undefined
+}
+async function previewOverlay() {
+  await window.ezlol?.previewOverlay?.()
+  flash('小窗预览 10 秒', 'ok')
+}
 let msgTimer: ReturnType<typeof setTimeout> | undefined
 let pressOnBackdrop = false
 
@@ -95,15 +111,6 @@ async function save(patch: Record<string, unknown>): Promise<boolean> {
   } finally {
     busy.value = false
   }
-}
-
-async function saveKey() {
-  if (busy.value || !key.value) return
-  if (await save({ riotApiKey: key.value })) key.value = ''
-}
-
-function clearKey() {
-  return save({ riotApiKey: '' })
 }
 
 async function check() {
@@ -298,68 +305,51 @@ onBeforeUnmount(() => {
                 </dd>
               </div>
             </dl>
+
+            <h3>游戏内小窗与快捷键</h3>
+            <p class="muted lead">
+              小窗总在最上层，点击会穿过它、不会抢游戏焦点，截屏时也看不到它（不影响识别）。
+              全屏模式下能不能盖在游戏上，取决于 Windows 的「全屏优化」：请在英雄联盟游戏程序
+              <code>Game\League of Legends.exe</code> 上右键 → 属性 → 兼容性，确认<b>没有</b>勾选「禁用全屏优化」。
+              如果全屏下还是看不到小窗，就只能改用「无边框」模式（看起来和全屏一样）。
+            </p>
+            <dl class="rows">
+              <div class="setting">
+                <dt>
+                  <span class="lbl"><label id="set-lbl-ov" for="set-ov">显示小窗</label></span>
+                  <span class="desc muted">出现强化选择时自动弹出；选完显示记录的强化和下一件装备，十几秒后自动隐藏。</span>
+                </dt>
+                <dd>
+                  <button id="set-ov" type="button" role="switch" class="toggle" :class="{ on: appS.overlay }" :aria-checked="appS.overlay" aria-labelledby="set-lbl-ov" :disabled="busy" @click="saveApp({ overlay: !appS.overlay })">
+                    <span class="track" aria-hidden="true" /><span class="state">{{ appS.overlay ? '开' : '关' }}</span>
+                  </button>
+                </dd>
+              </div>
+              <div class="setting">
+                <dt>
+                  <span class="lbl"><label for="set-ovpos">小窗位置</label></span>
+                  <span class="desc muted">放在不挡强化卡片的位置（强化卡片在屏幕中间）。</span>
+                </dt>
+                <dd>
+                  <select id="set-ovpos" :value="appS.overlayPos" @change="saveApp({ overlayPos: ($event.target as HTMLSelectElement).value as OverlayPos })">
+                    <option v-for="p in POSITIONS" :key="p.id" :value="p.id">{{ p.label }}</option>
+                  </select>
+                  <button type="button" @click="previewOverlay">预览小窗</button>
+                </dd>
+              </div>
+              <div v-for="r in HOTKEY_ROWS" :key="r.key" class="setting">
+                <dt>
+                  <span class="lbl">{{ r.label }}</span>
+                  <span v-if="appS.hotkeyErrors?.includes(appS.hotkeys[r.key])" class="desc warn">这个组合键被别的程序占用了，换一个。</span>
+                  <span v-else class="desc muted">当前：{{ prettyKey(appS.hotkeys[r.key]) }}</span>
+                </dt>
+                <dd>
+                  <input v-model="hkDraft[r.key]" class="short" :placeholder="prettyKey(appS.hotkeys[r.key])" spellcheck="false" autocomplete="off" @keydown.enter.prevent="saveHotkey(r.key)" />
+                  <button type="button" :disabled="!hkDraft[r.key]" @click="saveHotkey(r.key)">改</button>
+                </dd>
+              </div>
+            </dl>
           </template>
-          <!-- Riot API -->
-          <h3>Riot API（可选）</h3>
-          <p class="muted lead">
-            一般不需要：出装和强化数据默认来自 op.gg / aramgg，不用 key。只有想用东南亚服高分段排位对局自己统计峡谷出装时才需要。
-            在 <a href="https://developer.riotgames.com" target="_blank" rel="noreferrer">developer.riotgames.com</a> 申请 key。
-            key 只保存在本机的 <code>settings.json</code>，不会写进日志，也只发给 Riot。
-          </p>
-          <dl class="rows">
-            <div class="setting wide">
-              <dt>
-                <span class="lbl">
-                  <label for="set-key">API key</label>
-                  <span class="badge" :class="{ riot: s.riotApiKeySet }">
-                    <template v-if="s.riotApiKeySet">已设置 <span class="hint">{{ s.riotApiKeyHint }}</span></template>
-                    <template v-else>未设置</template>
-                  </span>
-                </span>
-                <span class="desc muted">开发者 key 每 24 小时过期，过期后在这里粘贴新的。</span>
-              </dt>
-              <dd>
-                <input id="set-key" v-model="key" type="password" class="key" placeholder="RGAPI-…" autocomplete="off" spellcheck="false" @keydown.enter.prevent="saveKey" />
-                <button type="button" class="primary" :disabled="busy || !key" @click="saveKey">保存</button>
-                <button type="button" class="danger" :disabled="busy || !s.riotApiKeySet" @click="clearKey">清除</button>
-              </dd>
-            </div>
-
-            <div class="setting">
-              <dt>
-                <span class="lbl"><label for="set-platform">服务器</label></span>
-                <span class="desc muted">统计对局时从哪个服务器拉数据。</span>
-              </dt>
-              <dd>
-                <select id="set-platform" v-model="s.platform" @change="save({ platform: s.platform })">
-                  <option v-if="!PLATFORMS.some((p) => p.id === s?.platform)" :value="s.platform">{{ s.platform }}</option>
-                  <option v-for="p in PLATFORMS" :key="p.id" :value="p.id">{{ p.label }}</option>
-                </select>
-              </dd>
-            </div>
-
-            <div class="setting">
-              <dt>
-                <span class="lbl"><label for="set-matches">每次统计对局数</label></span>
-                <span class="desc muted">每次统计抓取多少场对局（10 – 5000）。</span>
-              </dt>
-              <dd>
-                <input id="set-matches" v-model.number="s.matchesPerRun" type="number" class="short" min="10" max="5000" step="10" @change="save({ matchesPerRun: s.matchesPerRun })" />
-              </dd>
-            </div>
-
-            <div class="setting">
-              <dt>
-                <span class="lbl"><label id="set-lbl-compile" for="set-compile">启动时统计</label></span>
-                <span class="desc muted">每次打开程序时自动统计一次。</span>
-              </dt>
-              <dd>
-                <button id="set-compile" type="button" role="switch" class="toggle" :class="{ on: s.autoCompile }" :aria-checked="s.autoCompile" aria-labelledby="set-lbl-compile" @click="save({ autoCompile: !s.autoCompile })">
-                  <span class="track" aria-hidden="true" /><span class="state">{{ s.autoCompile ? '开' : '关' }}</span>
-                </button>
-              </dd>
-            </div>
-          </dl>
         </template>
 
         <div v-else-if="loadError" class="empty">

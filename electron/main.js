@@ -1,5 +1,5 @@
 'use strict'
-const { app, BrowserWindow, shell, Menu, ipcMain, Notification, Tray, nativeImage } = require('electron')
+const { app, BrowserWindow, shell, Menu, ipcMain, Notification, Tray, nativeImage, globalShortcut, screen } = require('electron')
 const { spawn } = require('node:child_process')
 const path = require('node:path')
 const fs = require('node:fs')
@@ -31,14 +31,17 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => showWindow())
 }
 
-// ---- Desktop settings: launch at login, start in the tray / menu bar ----
-const APP_SETTINGS_DEFAULTS = { launchAtLogin: false, startInTray: false }
+// ---- Desktop settings: login item, tray, overlay, hotkeys ----
+const HOTKEY_DEFAULTS = { pick1: 'CommandOrControl+Shift+1', pick2: 'CommandOrControl+Shift+2', pick3: 'CommandOrControl+Shift+3', toggle: 'CommandOrControl+Shift+H' }
+const OVERLAY_POSITIONS = ['bottom-left', 'top-left', 'left-middle', 'top-right', 'bottom-right']
+const APP_SETTINGS_DEFAULTS = { launchAtLogin: false, startInTray: false, overlay: true, overlayPos: 'bottom-left', hotkeys: HOTKEY_DEFAULTS }
 const appSettingsPath = () => path.join(app.getPath('userData'), 'app-settings.json')
 function loadAppSettings() {
   try {
-    return { ...APP_SETTINGS_DEFAULTS, ...JSON.parse(fs.readFileSync(appSettingsPath(), 'utf8')) }
+    const saved = JSON.parse(fs.readFileSync(appSettingsPath(), 'utf8'))
+    return { ...APP_SETTINGS_DEFAULTS, ...saved, hotkeys: { ...HOTKEY_DEFAULTS, ...(saved.hotkeys || {}) } }
   } catch {
-    return { ...APP_SETTINGS_DEFAULTS }
+    return { ...APP_SETTINGS_DEFAULTS, hotkeys: { ...HOTKEY_DEFAULTS } }
   }
 }
 function saveAppSettings(s) {
@@ -70,7 +73,7 @@ function loginItemState() {
   }
 }
 function appSettingsView() {
-  return { ...appSettings, ...loginItemState(), platform: process.platform, packaged: app.isPackaged }
+  return { ...appSettings, ...loginItemState(), hotkeyErrors, platform: process.platform, packaged: app.isPackaged }
 }
 
 function showWindow() {
@@ -119,16 +122,198 @@ function updateTray() {
 }
 function setAppSettings(patch) {
   const clean = {}
-  for (const k of Object.keys(APP_SETTINGS_DEFAULTS)) if (patch && typeof patch[k] === 'boolean') clean[k] = patch[k]
+  for (const k of ['launchAtLogin', 'startInTray', 'overlay']) if (patch && typeof patch[k] === 'boolean') clean[k] = patch[k]
+  if (patch && OVERLAY_POSITIONS.includes(patch.overlayPos)) clean.overlayPos = patch.overlayPos
+  if (patch && patch.hotkeys && typeof patch.hotkeys === 'object') {
+    const hk = { ...appSettings.hotkeys }
+    for (const k of Object.keys(HOTKEY_DEFAULTS)) {
+      const v = patch.hotkeys[k]
+      if (typeof v === 'string' && /^[A-Za-z0-9+]{1,40}$/.test(v)) hk[k] = v
+    }
+    clean.hotkeys = hk
+  }
   appSettings = { ...appSettings, ...clean }
   saveAppSettings(appSettings)
   applyLoginItem()
   updateTray()
+  registerHotkeys()
+  if (appSettings.overlay && !overlayWin) createOverlay()
+  updateOverlay()
   const view = appSettingsView()
   if (win) win.webContents.send('app-settings', view)
   return view
 }
 ipcMain.handle('app-settings:get', () => appSettingsView())
+
+// ---- Overlay: always-on-top mini window over the game ----
+// It never takes focus and lets clicks through (a focused window would pull a
+// fullscreen game out of fullscreen), and it is excluded from screen capture so
+// its own text is never OCR'd. What it shows is decided by its page; it asks
+// to be shown via 'overlay:want'.
+const OVERLAY_W = 404
+let overlayWin = null
+let overlayMode = 'auto' // auto | pinned (hotkey: always show) | hidden (hotkey: hide until next offer)
+let overlayWant = 'none' // offer | info | pinned | none
+let overlayHeight = 160
+let previewUntil = 0
+let hotkeyErrors = []
+
+function createOverlay() {
+  overlayWin = new BrowserWindow({
+    width: OVERLAY_W,
+    height: overlayHeight,
+    show: false,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    focusable: false,
+    alwaysOnTop: true,
+    hasShadow: false,
+    title: 'ezlol overlay',
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  })
+  overlayWin.setAlwaysOnTop(true, 'screen-saver')
+  overlayWin.setIgnoreMouseEvents(true)
+  overlayWin.setContentProtection(true)
+  overlayWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  overlayWin.loadURL(`${URL}/?overlay=1`)
+  overlayWin.webContents.on('did-finish-load', () => {
+    if (!overlayWin) return
+    overlayWin.webContents.send('overlay:mode', overlayMode)
+    overlayWin.webContents.send('overlay:hotkeys', appSettings.hotkeys)
+  })
+  overlayWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  overlayWin.on('closed', () => (overlayWin = null))
+}
+
+function positionOverlay() {
+  if (!overlayWin) return
+  // Full display bounds, not the work area: a fullscreen game covers the taskbar.
+  const d = screen.getPrimaryDisplay().bounds
+  const w = OVERLAY_W
+  const h = Math.max(40, Math.min(640, overlayHeight))
+  const m = 16
+  let x = d.x + m
+  let y = d.y + d.height - h - m
+  switch (appSettings.overlayPos) {
+    case 'top-left':
+      y = d.y + m
+      break
+    case 'left-middle':
+      y = d.y + (d.height - h) / 2
+      break
+    case 'top-right':
+      x = d.x + d.width - w - m
+      y = d.y + m
+      break
+    case 'bottom-right':
+      x = d.x + d.width - w - m
+      break
+  }
+  overlayWin.setBounds({ x: Math.round(x), y: Math.round(y), width: w, height: h })
+}
+
+function updateOverlay() {
+  if (!overlayWin) return
+  const previewing = Date.now() < previewUntil
+  const show = previewing || (appSettings.overlay && (overlayMode === 'pinned' || (overlayMode !== 'hidden' && overlayWant !== 'none')))
+  if (show) {
+    positionOverlay()
+    if (!overlayWin.isVisible()) overlayWin.showInactive()
+    overlayWin.setAlwaysOnTop(true, 'screen-saver')
+  } else if (overlayWin.isVisible()) {
+    overlayWin.hide()
+  }
+}
+
+ipcMain.on('overlay:want', (e, state, height) => {
+  if (!overlayWin || e.sender !== overlayWin.webContents) return
+  if (!['offer', 'info', 'pinned', 'none'].includes(state)) return
+  // A new augment choice brings a hidden overlay back.
+  if (state === 'offer' && overlayWant !== 'offer' && overlayMode === 'hidden') {
+    overlayMode = 'auto'
+    overlayWin.webContents.send('overlay:mode', overlayMode)
+  }
+  overlayWant = state
+  if (height > 0) overlayHeight = height
+  updateOverlay()
+})
+
+ipcMain.handle('overlay:preview', () => {
+  if (!overlayWin) createOverlay()
+  previewUntil = Date.now() + 10000
+  const send = () => overlayWin && overlayWin.webContents.send('overlay:preview')
+  if (overlayWin.webContents.isLoading()) overlayWin.webContents.once('did-finish-load', send)
+  else send()
+  setTimeout(updateOverlay, 300)
+  setTimeout(updateOverlay, 10100)
+  return true
+})
+
+function flashOverlay(text) {
+  if (!overlayWin) return
+  overlayWin.webContents.send('overlay:flash', text)
+}
+
+// ---- Global hotkeys (work while the game has focus, even fullscreen) ----
+function postJSON(pathname, body) {
+  return new Promise((resolve) => {
+    const data = JSON.stringify(body)
+    const req = http.request(`${URL}${pathname}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } }, (res) => {
+      let out = ''
+      res.setEncoding('utf8')
+      res.on('data', (d) => (out += d))
+      res.on('end', () => {
+        try {
+          resolve({ status: res.statusCode, body: JSON.parse(out) })
+        } catch {
+          resolve({ status: res.statusCode, body: {} })
+        }
+      })
+    })
+    req.on('error', (err) => resolve({ status: 0, body: { error: String(err.message || err) } }))
+    req.setTimeout(3000, () => req.destroy())
+    req.end(data)
+  })
+}
+
+async function pickSlot(n) {
+  const r = await postJSON('/api/game/pick-slot', { slot: n })
+  if (r.status === 200) flashOverlay(`已标记：第 ${n} 个「${r.body.augment || ''}」`)
+  else flashOverlay(r.body.error || '标记失败')
+  if (overlayMode === 'hidden') overlayMode = 'auto'
+}
+
+function toggleOverlay() {
+  if (!overlayWin) createOverlay()
+  overlayMode = overlayWin.isVisible() ? 'hidden' : 'pinned'
+  overlayWin.webContents.send('overlay:mode', overlayMode)
+  updateOverlay()
+}
+
+function registerHotkeys() {
+  globalShortcut.unregisterAll()
+  hotkeyErrors = []
+  const hk = appSettings.hotkeys
+  const reg = (acc, fn) => {
+    try {
+      if (!globalShortcut.register(acc, fn)) hotkeyErrors.push(acc)
+    } catch {
+      hotkeyErrors.push(acc)
+    }
+  }
+  reg(hk.pick1, () => pickSlot(1))
+  reg(hk.pick2, () => pickSlot(2))
+  reg(hk.pick3, () => pickSlot(3))
+  reg(hk.toggle, toggleOverlay)
+  if (overlayWin) overlayWin.webContents.send('overlay:hotkeys', hk)
+}
 ipcMain.handle('app-settings:set', (_e, patch) => setAppSettings(patch))
 
 const BIN = process.platform === 'win32' ? 'ezlol.exe' : 'ezlol'
@@ -224,7 +409,15 @@ function createWindow(show = true) {
       win.hide()
     }
   })
-  win.on('closed', () => (win = null))
+  win.on('closed', () => {
+    win = null
+    // The overlay is a window too, so 'window-all-closed' would never fire: quit here
+    // (tray mode keeps running hidden instead, see 'close' above).
+    if (process.platform !== 'darwin' && !app.isQuitting) {
+      app.isQuitting = true
+      app.quit()
+    }
+  })
 }
 
 ipcMain.handle('notify', (_e, title, body) => {
@@ -373,9 +566,14 @@ app.whenReady().then(async () => {
   createWindow(!appSettings.startInTray)
   applyLoginItem()
   updateTray()
+  registerHotkeys()
+  if (appSettings.overlay) createOverlay()
+  screen.on('display-metrics-changed', updateOverlay)
   setupUpdates()
   app.on('activate', () => showWindow())
 })
+
+app.on('will-quit', () => globalShortcut.unregisterAll())
 
 app.on('before-quit', () => {
   app.isQuitting = true

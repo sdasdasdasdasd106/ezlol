@@ -1,12 +1,12 @@
 <script setup lang="ts">
-// Fixed champion bar above the widget grid: portrait, mode / lane buttons,
+// Fixed champion bar above the widget grid: portrait, ARAM Mayhem tier,
 // source and tier, your mastery and record, the Follow switch. Clicking the
 // portrait / name opens the champion picker as a dropdown card. It drives the
 // shared build state that the build widgets read; it is never part of the grid.
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import ChampionPicker from './ChampionPicker.vue'
-import { fmtPoints, ROLES, ROLE_LABEL, winrate } from '../api'
-import { buildState as s, loadBuild, pickMode, pickRole } from '../build'
+import { fmtPoints, winrate } from '../api'
+import { buildState as s, loadBuild } from '../build'
 import type { Champion, Status } from '../types'
 
 const props = defineProps<{ champion: Champion | null; champions: Champion[]; status: Status | null; screen: 'idle' | 'select' | 'game'; compact?: boolean }>()
@@ -48,32 +48,8 @@ onUnmounted(() => {
 
 watch(
   () => props.champion?.id,
-  () => {
-    s.role = ''
-    void loadBuild(props.champion)
-  },
+  () => void loadBuild(props.champion),
   { immediate: true },
-)
-// A forced mode or lane is for browsing in the lobby; a new screen (champ
-// select, game, back to lobby) goes back to following the client's queue.
-watch(
-  () => props.screen,
-  () => {
-    s.mode = ''
-    s.role = ''
-    pickerOpen.value = false
-    void loadBuild()
-  },
-)
-// The assigned lane usually arrives before the pick, so watch both together.
-watch(
-  () => [props.status?.pickedChampion, props.status?.pickedPosition] as const,
-  ([c, p]) => {
-    if (follow.value && p && c === props.champion?.id && p !== s.role) {
-      s.role = p
-      void loadBuild()
-    }
-  },
 )
 watch(
   () => props.status?.connected,
@@ -81,17 +57,9 @@ watch(
     if (c && !prev) void loadBuild()
   },
 )
-watch(
-  () => props.status?.queueId,
-  () => {
-    if (!s.mode) void loadBuild()
-  },
-)
 
 const pctf = (x: number) => `${Math.round(x * 100)}%`
-const tierLabel = (t?: number) => (t ? ['', 'S', 'A', 'B', 'C', 'D'][t] ?? String(t) : '')
-const patchOf = (p: string) => p.replace('-aram', '').replace('-arena', '')
-const games = (r: string) => build.value?.roles?.find((x) => x.role === r)?.games
+const n = (g: number) => (g >= 10000 ? `${(g / 10000).toFixed(1)} 万` : String(g))
 </script>
 
 <template>
@@ -114,37 +82,25 @@ const games = (r: string) => build.value?.roles?.find((x) => x.role === r)?.game
         <span class="who">
           <span class="name">{{ build.champion.name }}<i class="chev" :class="{ up: pickerOpen }" /></span>
           <span class="title">
-            {{ build.champion.title }} · 版本 {{ patchOf(build.patch) }}<span v-if="build.mode === 'aram'"> · 大乱斗</span><span v-else-if="build.mode === 'arena'"> · 斗魂竞技场</span>
+            {{ build.champion.title }} · 版本 {{ build.patch }} · 海克斯乱斗
           </span>
         </span>
       </button>
       <div class="rows">
         <div class="row1">
-          <div class="roles">
-            <button :class="{ active: build.mode === 'sr' }" @click="pickMode('sr')">召唤师峡谷</button>
-            <button :class="{ active: build.mode === 'aram' }" @click="pickMode('aram')">大乱斗</button>
-            <button :class="{ active: build.mode === 'arena' }" @click="pickMode('arena')">斗魂竞技场</button>
-            <template v-if="build.mode !== 'aram' && build.mode !== 'arena'">
-              <span class="sep" />
-              <button v-for="r in ROLES" :key="r" class="sm" :class="{ active: s.role === r }" @click="pickRole(r)">
-                {{ ROLE_LABEL[r] }}<span v-if="games(r)" class="muted"> {{ games(r) }}</span>
-              </button>
-            </template>
-          </div>
           <div class="facts">
             <span class="badge" :class="build.source">
-              {{ build.source === 'opgg' ? (build.mode === 'arena' ? 'op.gg 斗魂竞技场数据' : build.mode === 'aram' ? 'op.gg 大乱斗数据' : 'op.gg 排位数据') : build.source === 'riot' ? '自行统计的排位对局' : build.source === 'lcu' ? '客户端官方推荐' : '暂无数据' }}
+              {{ build.source === 'aramkit' ? 'aramkit 海克斯乱斗数据' : build.source === 'opgg' ? 'op.gg 普通大乱斗数据' : '暂无数据' }}
             </span>
-            <span v-if="build.tier" class="badge tier" :class="'t' + build.tier">{{ tierLabel(build.tier) }} 级 · 第 {{ build.rank }} 名<template v-if="build.pickRate"> · 选取率 {{ pctf(build.pickRate) }}</template></span>
-            <span v-if="build.total.games && build.mode !== 'arena'" class="muted">{{ build.total.games }} 场 · 胜率 {{ winrate(build.total) }}</span>
-            <span v-else-if="build.total.games" class="muted">{{ build.total.games }} 场 · 平均名次 {{ (build.avgPlace ?? 0).toFixed(2) }} · 第一 {{ pctf(build.top1 ?? 0) }}</span>
+            <span v-if="build.tier" class="badge tier" :class="'t' + build.tier">{{ build.tier }} 级 · 第 {{ build.rank }} 名<template v-if="build.pickRate"> · 选取率 {{ pctf(build.pickRate) }}</template></span>
+            <span v-if="build.total.games" class="muted">{{ n(build.total.games) }} 场 · 胜率 {{ winrate(build.total) }}</span>
           </div>
         </div>
         <div class="row2">
           <div class="facts">
             <span v-if="me?.mastery" class="badge lcu" :title="`最高评分 ${me.mastery.highestGrade}`">你的熟练度：{{ me.mastery.championLevel }} 级 · {{ fmtPoints(me.mastery.championPoints) }}</span>
             <span v-if="me?.record" class="badge riot">
-              最近{{ build.mode === 'aram' ? '大乱斗' : '峡谷' }}：{{ me.record.wins }}胜 {{ me.record.games - me.record.wins }}负 ·
+              最近大乱斗：{{ me.record.wins }}胜 {{ me.record.games - me.record.wins }}负 ·
               KDA {{ ((me.record.kills + me.record.assists) / Math.max(1, me.record.deaths)).toFixed(1) }}
             </span>
           </div>
@@ -181,7 +137,7 @@ const games = (r: string) => build.value?.roles?.find((x) => x.role === r)?.game
       <button type="button" class="who-btn" :aria-expanded="pickerOpen" aria-haspopup="dialog" @click="pickerOpen = !pickerOpen">
         <span class="who">
           <span class="name">选择英雄<i class="chev" :class="{ up: pickerOpen }" /></span>
-          <span class="title">点这里搜索；或者在选英雄时锁定，出装会自动切过去。</span>
+          <span class="title">点这里搜索；或者在选英雄时锁定、进游戏后，出装会自动切过去。</span>
         </span>
       </button>
     </template>
@@ -225,8 +181,8 @@ const games = (r: string) => build.value?.roles?.find((x) => x.role === r)?.game
 button.sm { padding: 4px 8px; font-size: 10px; }
 .badge.opgg { color: var(--hextech-2); border-color: var(--hextech-dim); }
 .badge.tier { color: var(--gold-bright); }
-.badge.tier.t1 { color: #ff8a3d; border-color: #ff8a3d; }
-.badge.tier.t2 { color: var(--gold); border-color: var(--gold); }
+.badge.tier.tS { color: #ff8a3d; border-color: #ff8a3d; }
+.badge.tier.tA { color: var(--gold); border-color: var(--gold); }
 .badge.ap { color: #7fb3ff; border-color: #2a4a7a; }
 .badge.ad { color: #e8a33d; border-color: #7a5a2a; }
 .load-backdrop { position: fixed; inset: 0; z-index: 150; background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(3px); display: grid; place-items: center; animation: fadein .15s ease; }

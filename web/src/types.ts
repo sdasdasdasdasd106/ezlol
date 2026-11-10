@@ -39,74 +39,24 @@ export interface ItemSet extends Count {
   items: ItemRef[]
   avgPlace?: number
 }
-export interface RuneRef {
-  id: number
-  name: string
-  icon: string
-  desc?: string
-}
-export interface StyleRef {
-  id: number
-  name: string
-  icon: string
-}
-export interface RunePage extends Count {
-  primary: StyleRef
-  secondary: StyleRef
-  perks: RuneRef[]
-  shards: RuneRef[]
-  source: string
-}
-export interface SpellRef {
-  id: number
-  name: string
-  image: string
-}
-export interface SpellPair extends Count {
-  spells: SpellRef[]
-}
-export interface Skills extends Count {
-  order: string
-}
-export interface RoleCount extends Count {
-  role: string
-}
-
 export interface Build {
   champion: Champion
   patch: string
-  role: string
   mode: string
-  roles: RoleCount[] | null
-  source: string
+  source: string // aramkit | opgg | none
   total: Count
   starting: ItemSet[] | null
   core: ItemSet[] | null
+  coreTags?: string[] | null
   boots: ItemSet[] | null
   late: ItemSet[] | null
-  items: ItemSet[] | null
-  runes: RunePage[] | null
-  spells: SpellPair[] | null
-  skillOrder: Skills[] | null
-  skillStart: Skills[] | null
-  skillPath?: string[]
-  tier?: number
+  tier?: string
   rank?: number
   pickRate?: number
   augments?: Augment[]
   augScope?: string
-  prismatic?: ItemSet[] | null
-  synergies?: Synergy[] | null
-  avgPlace?: number
-  top1?: number
+  augSource?: string
   notes: string[] | null
-}
-export interface Synergy {
-  champion: Champion
-  games: number
-  winRate: number
-  avgPlace: number
-  top1: number
 }
 export interface Augment {
   id: number
@@ -119,32 +69,8 @@ export interface Augment {
   pickRate: number
   games: number
   scope: string
-  avgPlace?: number
-  top1?: number
 }
 
-export interface Progress {
-  running: boolean
-  phase: string
-  queue: number
-  players: number
-  matchesDone: number
-  target: number
-  requests: number
-  errors: number
-  lastError?: string
-  startedAt?: string
-  finishedAt?: string
-}
-
-export interface BuildsStatus {
-  hasKey: boolean
-  platform: string
-  progress: Progress
-  patches: { patch: string; matches: number; champions: number }[] | null
-}
-
-/** One augment on the selection screen, with why it ranks where it does. */
 export interface OfferCard extends Augment {
   score: number
   stageWinRate: number
@@ -165,6 +91,8 @@ export interface AugmentOffer {
   level: number
   stage: number
   offered: OfferCard[] | null
+  screen?: number[] // augment ids left to right, as on screen
+  chosen?: number // slot (1..3) marked with a hotkey
   best?: string
   why?: string
   note?: string
@@ -228,11 +156,6 @@ export interface ChampionInfo {
   playstyleInfo: { damage: number; durability: number; crowdControl: number; mobility: number; utility: number }
 }
 export interface SettingsView {
-  riotApiKeySet: boolean
-  riotApiKeyHint: string
-  platform: string
-  matchesPerRun: number
-  autoCompile: boolean
   ocr: boolean
   ocrAvailable: boolean
   ocrLang: string
@@ -257,7 +180,7 @@ export interface Game {
   inGame: boolean
   gameTime: number
   mapId: number
-  mode: 'aram' | 'arena' | 'sr' | ''
+  mode: string // aram for ARAM / Mayhem
   me?: { name: string; champion: Champion; team: string; isDead: boolean; level: number; items: number[] | null }
   patch: string
   picks: AugPick[] | null

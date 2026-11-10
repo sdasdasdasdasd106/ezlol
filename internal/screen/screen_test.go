@@ -1,6 +1,9 @@
 package screen
 
-import "testing"
+import (
+	"image"
+	"testing"
+)
 
 func TestMatch(t *testing.T) {
 	cands := map[string]string{
@@ -68,5 +71,26 @@ func TestMatchChinese(t *testing.T) {
 	// Three characters must not be fuzzily matched to something else.
 	if hits := Match([]Line{{Text: "尤里斯", Conf: 1, X: 0.5, Y: 0.4}}, cands); len(hits) != 0 {
 		t.Fatalf("fuzzy 3-character match: %v", hits)
+	}
+}
+
+func TestIsBlackAndBand(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 1000, 500))
+	if !IsBlack(img) {
+		t.Fatal("empty frame should be black")
+	}
+	// A dark game scene with some bright UI is not black.
+	for y := 200; y < 260; y++ {
+		for x := 100; x < 900; x++ {
+			o := img.PixOffset(x, y)
+			img.Pix[o], img.Pix[o+1], img.Pix[o+2], img.Pix[o+3] = 220, 200, 120, 255
+		}
+	}
+	if IsBlack(img) {
+		t.Fatal("frame with content reported black")
+	}
+	band, cx, cy := OfferBand(img)
+	if cx != 80 || cy != 60 || band.Bounds().Dx() != 840 || band.Bounds().Dy() != 390 {
+		t.Fatalf("band %v %d %d", band.Bounds(), cx, cy)
 	}
 }

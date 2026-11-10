@@ -1,9 +1,13 @@
-# ezlol-ocr (Windows): a long-running helper. ezlol writes "scan" on stdin; the
-# helper captures the League game window, runs the built-in Windows OCR
+# ezlol-ocr (Windows): a long-running helper. ezlol sends commands on stdin; the
+# helper OCRs the League game window with the built-in Windows OCR
 # (Windows.Media.Ocr, Simplified Chinese when installed) and answers with one
 # JSON line: {"width":..,"height":..,"lang":"zh-Hans-CN","lines":[{text,conf,x,y,w}]}
 # with x/y/w normalised to the game window (0..1, top-left origin).
-# "scan<TAB>C:\path\shot.png" also saves the captured image there (test logs).
+# Commands (one per line, tab separated):
+#   scan[<TAB>shot.png[<TAB>note]]  capture with GDI; optionally save the image
+#   file<TAB>img.png<TAB>cx<TAB>cy<TAB>fullW<TAB>fullH<TAB>capture
+#        OCR an image ezlol captured itself (Desktop Duplication); cx/cy is its
+#        offset inside the game window, fullW x fullH the window size.
 # Errors are reported as {"error":"..."}. "quit" or end of input exits.
 
 $ErrorActionPreference = 'Stop'
@@ -77,33 +81,33 @@ function Get-GameRect {
     return [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 }
 
-function Scan([string]$dump) {
-    $full = Get-GameRect
-    # Augment cards sit in the middle of the screen: crop to that band (less to
-    # read, no chat box), then map positions back to the full window.
-    $cx = [int]($full.Width * 0.08); $cy = [int]($full.Height * 0.12)
-    $cw = [int]($full.Width * 0.84); $ch = [int]($full.Height * 0.78)
-    $bmp = New-Object System.Drawing.Bitmap $cw, $ch
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    try {
-        $g.CopyFromScreen($full.X + $cx, $full.Y + $cy, 0, 0, (New-Object System.Drawing.Size $cw, $ch))
-    } finally { $g.Dispose() }
+# Rough black-frame check: exclusive fullscreen can give a capture that is
+# all black. Samples a grid of pixels.
+function Test-Black($bmp) {
+    $sum = 0; $max = 0; $n = 0
+    for ($i = 1; $i -lt 20; $i++) {
+        for ($j = 1; $j -lt 20; $j++) {
+            $c = $bmp.GetPixel([int]($bmp.Width * $i / 20), [int]($bmp.Height * $j / 20))
+            $l = ($c.R * 3 + $c.G * 6 + $c.B) / 10
+            $sum += $l; if ($l -gt $max) { $max = $l }; $n++
+        }
+    }
+    return (($sum / $n) -lt 6 -and $max -lt 30)
+}
 
+# OCR a bitmap that is a crop of the game window: (cx, cy) is the crop's
+# offset inside the window, fullW x fullH the window size.
+function Read-Bitmap($bmp, [double]$cx, [double]$cy, [double]$fullW, [double]$fullH) {
+    $cw = $bmp.Width; $ch = $bmp.Height
     $scale = 1.0
     if ($cw -gt $maxDim -or $ch -gt $maxDim) {
         $scale = [Math]::Min($maxDim / $cw, $maxDim / $ch)
         $small = New-Object System.Drawing.Bitmap $bmp, ([int]($cw * $scale)), ([int]($ch * $scale))
-        $bmp.Dispose(); $bmp = $small
+        $bmp = $small
     }
-
-    if ($dump) {
-        try { $bmp.Save($dump, [System.Drawing.Imaging.ImageFormat]::Png) } catch { }
-    }
-
     $ms = New-Object System.IO.MemoryStream
     try {
         $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Bmp)
-        $bmp.Dispose()
         $ms.Position = 0
         $ras = [System.IO.WindowsRuntimeStreamExtensions]::AsRandomAccessStream($ms)
         $decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($ras)) ([Windows.Graphics.Imaging.BitmapDecoder])
@@ -144,20 +148,63 @@ function Scan([string]$dump) {
             [void]$out.Add(@{
                 text = $text
                 conf = 1.0
-                x    = [Math]::Round($px / $full.Width, 4)
-                y    = [Math]::Round($py / $full.Height, 4)
-                w    = [Math]::Round((($maxX - $minX) / $scale) / $full.Width, 4)
+                x    = [Math]::Round($px / $fullW, 4)
+                y    = [Math]::Round($py / $fullH, 4)
+                w    = [Math]::Round((($maxX - $minX) / $scale) / $fullW, 4)
             })
         }
     }
-    return @{ width = $full.Width; height = $full.Height; lang = $langTag; lines = $out }
+    return , $out
+}
+
+# "scan": capture the game window with GDI (CopyFromScreen) and OCR it.
+function Scan([string]$dump, [string]$note) {
+    $full = Get-GameRect
+    # Augment cards sit in the middle of the screen: crop to that band (less to
+    # read, no chat box), then map positions back to the full window.
+    $cx = [int]($full.Width * 0.08); $cy = [int]($full.Height * 0.12)
+    $cw = [int]($full.Width * 0.84); $ch = [int]($full.Height * 0.78)
+    $bmp = New-Object System.Drawing.Bitmap $cw, $ch
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    try {
+        $g.CopyFromScreen($full.X + $cx, $full.Y + $cy, 0, 0, (New-Object System.Drawing.Size $cw, $ch))
+    } finally { $g.Dispose() }
+    if ($dump) {
+        try { $bmp.Save($dump, [System.Drawing.Imaging.ImageFormat]::Png) } catch { }
+    }
+    $capture = 'gdi'
+    if ($note) { $capture = "gdi ($note)" }
+    if (Test-Black $bmp) {
+        $bmp.Dispose()
+        return @{ width = $full.Width; height = $full.Height; lang = $langTag; capture = $capture; black = $true; lines = @() }
+    }
+    $lines = Read-Bitmap $bmp $cx $cy $full.Width $full.Height
+    $bmp.Dispose()
+    return @{ width = $full.Width; height = $full.Height; lang = $langTag; capture = $capture; lines = $lines }
+}
+
+# "file": OCR a frame ezlol already captured (Desktop Duplication) and cropped.
+function Scan-File([string]$path, [double]$cx, [double]$cy, [double]$fullW, [double]$fullH, [string]$capture) {
+    $bmp = New-Object System.Drawing.Bitmap $path
+    try {
+        $lines = Read-Bitmap $bmp $cx $cy $fullW $fullH
+    } finally { $bmp.Dispose() }
+    return @{ width = $fullW; height = $fullH; lang = $langTag; capture = $capture; lines = $lines }
 }
 
 Emit @{ ready = $true; lang = $langTag }
 while ($true) {
     $cmd = [Console]::In.ReadLine()
     if ($null -eq $cmd -or $cmd -eq 'quit') { break }
-    $dump = ''
-    if ($cmd.StartsWith("scan`t")) { $dump = $cmd.Substring(5) }
-    try { Emit (Scan $dump) } catch { Emit @{ error = $_.Exception.Message } }
+    $parts = $cmd.Split("`t")
+    try {
+        if ($parts[0] -eq 'file' -and $parts.Count -ge 7) {
+            Emit (Scan-File $parts[1] ([double]$parts[2]) ([double]$parts[3]) ([double]$parts[4]) ([double]$parts[5]) $parts[6])
+        } else {
+            $dump = ''; $note = ''
+            if ($parts.Count -ge 2) { $dump = $parts[1] }
+            if ($parts.Count -ge 3) { $note = $parts[2] }
+            Emit (Scan $dump $note)
+        }
+    } catch { Emit @{ error = $_.Exception.Message } }
 }

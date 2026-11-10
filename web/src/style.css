@@ -681,3 +681,7 @@ code { background: var(--surface-input); border: 1px solid var(--gold-deep); pad
 .gear { min-height: 40px; width: 46px; padding: 0; display: inline-grid; place-items: center; }
 .gear svg { display: block; transition: transform .25s ease; }
 .gear:hover svg { transform: rotate(30deg); }
+
+/* Overlay window: transparent, nothing but the card */
+html.overlay, html.overlay body, html.overlay #app { background: transparent !important; background-image: none !important; margin: 0; padding: 0; overflow: hidden; min-height: 0; min-width: 0; }
+html.overlay body::before, html.overlay body::after { display: none !important; }

@@ -2,9 +2,7 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -32,8 +30,6 @@ type Server struct {
 	log       *slog.Logger
 	watcher   *watcher.Watcher
 	dd        *ddragon.Store
-	store     *builds.Store
-	compiler  *builds.Compiler
 	community *builds.Community
 	settings  *settings.Store
 	update    *update.Checker
@@ -49,8 +45,8 @@ type Server struct {
 }
 
 // New wires a server.
-func New(log *slog.Logger, w *watcher.Watcher, dd *ddragon.Store, store *builds.Store, comp *builds.Compiler, community *builds.Community, cfg *settings.Store, upd *update.Checker, tlog *testlog.Logger, version string, ui fs.FS, devProxy string) *Server {
-	return &Server{log: log, watcher: w, dd: dd, store: store, compiler: comp, community: community, settings: cfg, update: upd, tlog: tlog, version: version, live: live.New(), ocr: screen.New(), ui: ui, devProxy: devProxy}
+func New(log *slog.Logger, w *watcher.Watcher, dd *ddragon.Store, community *builds.Community, cfg *settings.Store, upd *update.Checker, tlog *testlog.Logger, version string, ui fs.FS, devProxy string) *Server {
+	return &Server{log: log, watcher: w, dd: dd, community: community, settings: cfg, update: upd, tlog: tlog, version: version, live: live.New(), ocr: screen.New(), ui: ui, devProxy: devProxy}
 }
 
 // Handler builds the router.
@@ -62,6 +58,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/champions/{key}/build", s.build)
 	mux.HandleFunc("GET /api/game", s.game)
 	mux.HandleFunc("POST /api/game/pick", s.correctPick)
+	mux.HandleFunc("POST /api/game/pick-slot", s.pickSlot)
 	mux.HandleFunc("GET /api/champions/{key}/augment-build", s.augmentBuild)
 	mux.HandleFunc("POST /api/logs/open", s.openLogs)
 	mux.HandleFunc("GET /api/me/{id}", s.meChampion)
@@ -71,10 +68,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/update/check", s.checkUpdate)
 	mux.HandleFunc("GET /api/mastery", s.mastery)
 	mux.HandleFunc("GET /api/champions/{key}/info", s.championInfo)
-	mux.HandleFunc("POST /api/runes/apply", s.applyRunes)
-	mux.HandleFunc("GET /api/builds/status", s.buildsStatus)
-	mux.HandleFunc("POST /api/builds/compile", s.compile)
-	mux.HandleFunc("POST /api/builds/compile/stop", s.compileStop)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeErr(w, 404, "not found") })
 
 	switch {
@@ -231,8 +224,8 @@ func (s *Server) champions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"version": d.Version, "champions": list})
 }
 
-var validRoles = map[string]bool{"TOP": true, "JUNGLE": true, "MIDDLE": true, "BOTTOM": true, "UTILITY": true}
-
+// build returns the ARAM Mayhem build and augment list for a champion:
+// aramkit (Mayhem data) first, op.gg's ARAM data and aramgg as fallbacks.
 func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	d := s.dd.Data()
 	if d == nil {
@@ -251,173 +244,27 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "找不到这个英雄")
 		return
 	}
-	role := strings.ToUpper(r.URL.Query().Get("role"))
-	if role == "NONE" {
-		role = "" // ARAM builds carry NONE; let the server pick a lane for Rift
-	}
-	if role != "" && !validRoles[role] {
-		writeErr(w, 400, "role must be TOP, JUNGLE, MIDDLE, BOTTOM or UTILITY")
-		return
-	}
-
-	// Prefer the live client's patch; fall back to Data Dragon's.
-	st := s.watcher.Status()
-	patch := st.Patch
+	patch := s.watcher.Status().Patch
 	if patch == "" {
 		patch = builds.ShortPatch(d.Version)
 	}
-	// Queue family: explicit ?mode=aram|sr, else whatever the client is queued for.
-	queueID := st.QueueID
-	switch strings.ToLower(r.URL.Query().Get("mode")) {
-	case "aram":
-		queueID = 450
-	case "sr":
-		queueID = 420
-	case "arena":
-		queueID = 1700
-	}
-	mode := builds.QueueTag(queueID)
-	patch = builds.StoreKey(patch, queueID)
-
-	roles := s.store.Roles(patch, champ.ID)
-	if role == "" {
-		if len(roles) > 0 {
-			role = roles[0].Role
-		} else {
-			role = defaultRole(champ)
+	b, err := s.community.AramkitBuild(r.Context(), d, champ)
+	if err != nil {
+		s.log.Warn("aramkit build", "champion", champ.Key, "err", err)
+		if b, err = s.community.ARAMBuild(r.Context(), d, champ); err != nil {
+			s.log.Warn("op.gg build", "champion", champ.Key, "err", err)
+			b = &builds.Build{Champion: champ, Patch: patch, Mode: "aram", Source: "none", Notes: []string{"暂时拿不到出装数据，请检查网络后重试。"}}
 		}
 	}
-
-	var b *builds.Build
-	if s.community != nil {
-		var cb *builds.Build
-		var err error
-		switch mode {
-		case "aram":
-			cb, err = s.community.ARAMBuild(r.Context(), d, champ)
-		case "arena":
-			cb, err = s.community.ArenaBuild(r.Context(), d, champ)
-		default:
-			cb, err = s.community.RiftBuild(r.Context(), d, champ, role)
-		}
-		if err != nil {
-			s.log.Warn("community build", "champion", champ.Key, "mode", mode, "err", err)
-		} else {
-			b = cb
-			b.Roles = roles
-		}
-	}
-	if b != nil {
-		// already resolved from the community source
-	} else if agg, err := s.store.Agg(patch, champ.ID, role); err == nil {
-		b = builds.Resolve(d, champ, patch, role, roles, agg)
-		b.Mode = mode
+	if augs, err := s.community.AramkitAugments(r.Context(), patch, champ.ID); err == nil && len(augs) > 0 {
+		b.Augments, b.AugScope, b.AugFrom = augs, "champion", "aramkit"
+	} else if augs, scope, err := s.community.Augments(r.Context(), patch, champ.ID); err == nil {
+		b.Augments, b.AugScope, b.AugFrom = augs, scope, "aramgg"
 	} else {
-		b = &builds.Build{Champion: champ, Patch: patch, Role: role, Roles: roles, Source: "none", Mode: mode}
-		if mode == "aram" {
-			b.Notes = append(b.Notes, "大乱斗：下面的符文是客户端官方推荐。")
-		}
-		if s.compiler.HasKey() {
-			b.Notes = append(b.Notes, "这个英雄/位置还没有统计数据，可以在「出装数据」面板里开始统计。")
-		} else {
-			b.Notes = append(b.Notes, "暂时拿不到出装数据（op.gg 无响应）。可在设置里填 Riot API key，从排位对局自己统计。")
-		}
-	}
-
-	if mode == "aram" && s.community != nil {
-		if augs, scope, err := s.community.Augments(r.Context(), st.Patch, champ.ID); err != nil {
-			s.log.Warn("community augments", "champion", champ.Key, "err", err)
-		} else {
-			b.Augments, b.AugScope = augs, scope
-		}
-	}
-	if mode == "arena" && s.community != nil {
-		if augs, scope, err := s.community.ArenaAugments(r.Context(), st.Patch, champ.ID); err != nil {
-			s.log.Warn("arena augments", "champion", champ.Key, "err", err)
-		} else {
-			b.Augments, b.AugScope = augs, scope
-		}
-	}
-
-	// Riot's in-client recommended runes need no key; add them when the client is
-	// up and we have nothing better than them.
-	if c := s.watcher.Client(); c != nil && b.Source != "opgg" {
-		ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
-		defer cancel()
-		mapID := 11
-		if mode == "aram" {
-			mapID = 12
-		}
-		if mode == "arena" {
-			mapID = 30
-		}
-		pos := role
-		if mapID == 12 {
-			pos = "NONE"
-		}
-		if pages, err := c.RecommendedRunes(ctx, champ.ID, pos, mapID); err == nil && len(pages) > 0 {
-			rp, sp := builds.FromLCU(d, pages)
-			b.Runes = append(b.Runes, rp...)
-			if len(b.Spells) == 0 {
-				b.Spells = sp
-			}
-			if b.Source == "none" {
-				b.Source = "lcu"
-			}
-		}
-	} else if b.Source == "none" {
-		b.Notes = append(b.Notes, "英雄联盟客户端没开：拿不到客户端推荐符文。")
+		s.log.Warn("augments", "champion", champ.Key, "err", err)
 	}
 	writeJSON(w, 200, b)
 }
-
-// defaultRole guesses a lane from Data Dragon tags when nothing is compiled.
-func defaultRole(c ddragon.Champion) string {
-	if len(c.Tags) == 0 {
-		return "MIDDLE"
-	}
-	switch c.Tags[0] {
-	case "Marksman":
-		return "BOTTOM"
-	case "Support":
-		return "UTILITY"
-	case "Tank", "Fighter":
-		return "TOP"
-	default:
-		return "MIDDLE"
-	}
-}
-
-func (s *Server) buildsStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{
-		"hasKey":   s.compiler.HasKey(),
-		"platform": s.compiler.Platform(),
-		"progress": s.compiler.Progress(),
-		"patches":  s.store.Patches(),
-	})
-}
-
-func (s *Server) compile(w http.ResponseWriter, r *http.Request) {
-	queue := 0
-	switch strings.ToLower(r.URL.Query().Get("queue")) {
-	case "aram":
-		queue = 450
-	case "ranked", "sr":
-		queue = 420
-	}
-	if err := s.compiler.Start(context.Background(), queue); err != nil {
-		writeErr(w, 409, err.Error())
-		return
-	}
-	writeJSON(w, 202, s.compiler.Progress())
-}
-
-func (s *Server) compileStop(w http.ResponseWriter, r *http.Request) {
-	s.compiler.Stop()
-	writeJSON(w, 200, s.compiler.Progress())
-}
-
-var _ = errors.New
 
 // meChampion returns the local player's mastery and recent record on a champion.
 func (s *Server) meChampion(w http.ResponseWriter, r *http.Request) {
@@ -428,10 +275,7 @@ func (s *Server) meChampion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.player.refresh(r.Context(), c)
-	tag := builds.QueueTag(s.watcher.Status().QueueID)
-	if q := r.URL.Query().Get("mode"); q != "" {
-		tag = q
-	}
+	tag := "aram"
 	m, rec := s.player.lookup(tag, id)
 	writeJSON(w, 200, map[string]any{"mastery": m, "record": rec, "mode": tag})
 }
