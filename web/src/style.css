@@ -43,8 +43,8 @@
   --panel-blur: blur(6px);
   --panel-corner: block;
   /* type */
-  --font-body: 'Spectral', Georgia, 'Times New Roman', serif;
-  --font-display: 'Cinzel', 'Trajan Pro', Georgia, serif;
+  --font-body: 'Spectral', Georgia, 'Times New Roman', 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', serif;
+  --font-display: 'Cinzel', 'Trajan Pro', Georgia, 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', serif;
   --serif: var(--font-body);
   --display: var(--font-display);
   --h2-color: var(--gold);
@@ -128,8 +128,8 @@
   --shadow-inset: none;
   --panel-blur: none;
   --panel-corner: none;
-  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --font-display: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', sans-serif;
+  --font-display: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', sans-serif;
   --h2-color: var(--text);
   --h2-bg: transparent;
   --h2-size: 13px;
@@ -197,8 +197,8 @@
   --shadow-inset: inset 0 0 0 1px #000;
   --panel-blur: blur(4px);
   --panel-corner: none;
-  --font-body: 'Rajdhani', 'Orbitron', system-ui, sans-serif;
-  --font-display: 'Orbitron', system-ui, sans-serif;
+  --font-body: 'Rajdhani', 'Orbitron', system-ui, 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', sans-serif;
+  --font-display: 'Orbitron', system-ui, 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', sans-serif;
   --h2-color: var(--accent);
   --h2-bg: linear-gradient(90deg, rgba(0, 240, 255, 0.12), transparent);
   --h2-size: 11px;
@@ -268,8 +268,8 @@
   --shadow-inset: none;
   --panel-blur: blur(6px);
   --panel-corner: none;
-  --font-body: 'Rajdhani', 'Segoe UI', system-ui, sans-serif;
-  --font-display: 'Audiowide', 'Orbitron', system-ui, sans-serif;
+  --font-body: 'Rajdhani', 'Segoe UI', system-ui, 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', sans-serif;
+  --font-display: 'Audiowide', 'Orbitron', system-ui, 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', sans-serif;
   --h2-color: var(--gold);
   --h2-bg: linear-gradient(90deg, rgba(255, 45, 149, 0.18), transparent);
   --h2-size: 11px;
@@ -340,8 +340,8 @@
   --shadow-inset: none;
   --panel-blur: none;
   --panel-corner: none;
-  --font-body: 'JetBrains Mono', ui-monospace, Menlo, monospace;
-  --font-display: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  --font-body: 'JetBrains Mono', ui-monospace, Menlo, 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', monospace;
+  --font-display: 'JetBrains Mono', ui-monospace, Menlo, 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', monospace;
   --h2-color: var(--accent);
   --h2-bg: transparent;
   --h2-size: 12px;
@@ -409,8 +409,8 @@
   --shadow-inset: none;
   --panel-blur: none;
   --panel-corner: none;
-  --font-body: 'Patrick Hand', 'Comic Sans MS', cursive;
-  --font-display: 'Architects Daughter', 'Patrick Hand', cursive;
+  --font-body: 'Patrick Hand', 'Comic Sans MS', 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', cursive;
+  --font-display: 'Architects Daughter', 'Patrick Hand', 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', cursive;
   --h2-color: #222222;
   --h2-bg: transparent;
   --h2-size: 15px;

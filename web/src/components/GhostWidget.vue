@@ -22,7 +22,7 @@ onBeforeUnmount(() => {
     <section class="panel grid-stack-item-content ghost-box">
       <div class="wcontent">
         <div class="g-title">{{ spec.title }}</div>
-        <div class="g-when">{{ spec.when ? `shows: ${spec.when}` : 'not on screen right now' }}</div>
+        <div class="g-when">{{ spec.when ? `出现时机：${spec.when}` : '当前不显示' }}</div>
       </div>
     </section>
   </div>

@@ -35,7 +35,7 @@ const m = (c: Champion) => mastery.value[String(c.id)]
 
 const filtered = computed(() => {
   const s = q.value.trim().toLowerCase()
-  let list = s ? props.champions.filter((c) => c.name.toLowerCase().includes(s) || c.key.toLowerCase().includes(s)) : [...props.champions]
+  let list = s ? props.champions.filter((c) => c.name.toLowerCase().includes(s) || c.title.toLowerCase().includes(s) || c.key.toLowerCase().includes(s)) : [...props.champions]
   if (sortBy.value === 'mastery') list = list.sort((a, b) => (m(b)?.championPoints ?? 0) - (m(a)?.championPoints ?? 0))
   return list
 })
@@ -46,18 +46,18 @@ function onEnter() {
 </script>
 
 <template>
-  <div v-show="open" class="picker" role="dialog" aria-label="Pick a champion">
+  <div v-show="open" class="picker" role="dialog" aria-label="选择英雄">
     <div class="row">
-      <input ref="input" v-model="q" placeholder="Search champion…" @keydown.enter="onEnter" @keydown.esc="emit('close')" style="flex: 1; width: auto" />
-      <button class="sm" :class="{ active: sortBy === 'name' }" @click="setSort('name')" title="Sort by name">A–Z</button>
-      <button class="sm" :class="{ active: sortBy === 'mastery' }" @click="setSort('mastery')" title="Sort by your mastery">M</button>
+      <input ref="input" v-model="q" placeholder="搜索英雄（中文名、称号或英文名）…" @keydown.enter="onEnter" @keydown.esc="emit('close')" style="flex: 1; width: auto" />
+      <button class="sm" :class="{ active: sortBy === 'name' }" @click="setSort('name')" title="按名字排序">名字</button>
+      <button class="sm" :class="{ active: sortBy === 'mastery' }" @click="setSort('mastery')" title="按你的熟练度排序">熟练度</button>
     </div>
     <div class="champ-grid">
-      <div v-for="c in filtered" :key="c.id" class="cell" :class="{ active: selected?.id === c.id }" :title="`${c.name}${m(c) ? ` · M${m(c).championLevel} · ${fmtPoints(m(c).championPoints)}` : ''}`" @click="emit('select', c)">
+      <div v-for="c in filtered" :key="c.id" class="cell" :class="{ active: selected?.id === c.id }" :title="`${c.name} ${c.title}${m(c) ? ` · 熟练度 ${m(c).championLevel} 级 · ${fmtPoints(m(c).championPoints)}` : ''}`" @click="emit('select', c)">
         <img :src="c.image" :alt="c.name" loading="lazy" />
         <span v-if="m(c)?.championLevel" class="m">{{ m(c).championLevel }}</span>
       </div>
-      <div v-if="!filtered.length" class="muted" style="grid-column: 1 / -1">No champion matches “{{ q }}”.</div>
+      <div v-if="!filtered.length" class="muted" style="grid-column: 1 / -1">没有找到“{{ q }}”。</div>
     </div>
   </div>
 </template>

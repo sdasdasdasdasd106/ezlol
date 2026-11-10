@@ -23,6 +23,7 @@ import (
 	"github.com/aarlint/ezlol/internal/builds"
 	"github.com/aarlint/ezlol/internal/ddragon"
 	"github.com/aarlint/ezlol/internal/settings"
+	"github.com/aarlint/ezlol/internal/testlog"
 	"github.com/aarlint/ezlol/internal/update"
 	"github.com/aarlint/ezlol/internal/watcher"
 	"github.com/aarlint/ezlol/web"
@@ -30,6 +31,10 @@ import (
 
 // version is set at build time with -ldflags "-X main.version=1.0.1".
 var version = "dev"
+
+// repo is the GitHub repository whose releases the update check follows; CI
+// sets it to the repository that built the binary (-X main.repo=owner/name).
+var repo = "aarlint/ezlol"
 
 func env(key, def string) string {
 	if v := os.Getenv(key); v != "" {
@@ -44,7 +49,7 @@ func main() {
 
 	addr := flag.String("addr", env("EZLOL_ADDR", "127.0.0.1:7331"), "listen address (loopback only by default)")
 	dataDir := flag.String("data", env("EZLOL_DATA_DIR", defaultData), "data directory")
-	platform := flag.String("platform", env("EZLOL_PLATFORM", "na1"), "Riot platform for build compilation (na1, euw1, kr, ...)")
+	platform := flag.String("platform", env("EZLOL_PLATFORM", "sg2"), "Riot platform for build compilation (sg2, ph2, th2, tw2, vn2, ...)")
 	matches := flag.Int("matches", envInt("EZLOL_MATCHES_PER_RUN", 200), "new matches per compile run")
 	dev := flag.String("dev", env("EZLOL_DEV", ""), "proxy UI to a Vite dev server, e.g. http://localhost:5173")
 	noOpen := flag.Bool("no-open", os.Getenv("EZLOL_NO_OPEN") != "", "do not open the browser on start")
@@ -112,10 +117,12 @@ func main() {
 		log.Info("no Riot API key; ranked compile disabled (set it in Settings). ARAM builds and runes need no key.")
 	}
 
-	upd := update.New("aarlint/ezlol", version)
+	upd := update.New(repo, version)
 	go upd.Run(ctx, 6*time.Hour, func() bool { return cfg.Get().UpdateCheck })
 
 	community := builds.NewCommunity(filepath.Join(*dataDir, "community"))
+	tlog := testlog.New(filepath.Join(*dataDir, "logs"), func() bool { return cfg.Get().TestLog }, func() bool { return cfg.Get().LogShots })
+	tlog.Log("start", map[string]any{"version": version, "os": runtime.GOOS})
 	w := watcher.New(log, time.Second, cfg)
 	go w.Run(ctx)
 
@@ -147,7 +154,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           api.New(log, w, dd, store, comp, community, cfg, upd, version, ui, *dev).Handler(),
+		Handler:           api.New(log, w, dd, store, comp, community, cfg, upd, tlog, version, ui, *dev).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	ln, err := net.Listen("tcp", *addr)

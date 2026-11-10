@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,9 +29,16 @@ type Community struct {
 	http *http.Client
 	mu   sync.Mutex
 	meta *augmentMeta
+	ak   aramkitCache
 }
 
 const cdragonBase = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/"
+
+// cdragonZH is the same game data with Simplified Chinese strings.
+const cdragonZH = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/zh_cn/"
+
+// blitzLocales: augment descriptions/names from blitz, Chinese first.
+var blitzLocales = []string{"zh_cn", "en_us"}
 
 // NewCommunity creates a provider caching under dir.
 func NewCommunity(dir string) *Community {
@@ -41,7 +49,8 @@ func NewCommunity(dir string) *Community {
 // Augment is one Mayhem augment with stats for a champion (or globally).
 type Augment struct {
 	ID       int     `json:"id"`
-	Name     string  `json:"name"`
+	Name     string  `json:"name"`             // Simplified Chinese when available
+	NameEN   string  `json:"nameEn,omitempty"` // English name, also matched on screen
 	Desc     string  `json:"desc"`
 	Rarity   string  `json:"rarity"` // prismatic | gold | silver | bronze
 	Icon     string  `json:"icon"`
@@ -83,7 +92,7 @@ func (c *Community) fetch(ctx context.Context, name, url string, ttl time.Durati
 		}
 		return nil, fmt.Errorf("%s: status %d", url, res.StatusCode)
 	}
-	b, err := io.ReadAll(io.LimitReader(res.Body, 16<<20))
+	b, err := io.ReadAll(io.LimitReader(res.Body, 48<<20))
 	if err != nil {
 		return nil, err
 	}
@@ -265,11 +274,12 @@ func (c *Community) opggBuild(ctx context.Context, d *ddragon.Data, champ ddrago
 // ---- augments ----
 
 type augmentMeta struct {
-	names  map[int]string
-	icons  map[int]string
-	rarity map[int]string
-	descs  map[int]string
-	at     time.Time
+	names   map[int]string // Chinese, falling back to English
+	namesEN map[int]string
+	icons   map[int]string
+	rarity  map[int]string
+	descs   map[int]string
+	at      time.Time
 }
 
 func (c *Community) loadMeta(ctx context.Context, patch string) *augmentMeta {
@@ -278,17 +288,18 @@ func (c *Community) loadMeta(ctx context.Context, patch string) *augmentMeta {
 	if c.meta != nil && time.Since(c.meta.at) < 24*time.Hour {
 		return c.meta
 	}
-	m := &augmentMeta{names: map[int]string{}, icons: map[int]string{}, rarity: map[int]string{}, descs: map[int]string{}, at: time.Now()}
+	m := &augmentMeta{names: map[int]string{}, namesEN: map[int]string{}, icons: map[int]string{}, rarity: map[int]string{}, descs: map[int]string{}, at: time.Now()}
+	type cherryRow struct {
+		ID     int    `json:"id"`
+		Name   string `json:"nameTRA"`
+		Icon   string `json:"augmentSmallIconPath"`
+		Rarity string `json:"rarity"`
+	}
 	if b, err := c.fetch(ctx, "cherry-augments.json", cdragonBase+"v1/cherry-augments.json", 24*time.Hour); err == nil {
-		var rows []struct {
-			ID     int    `json:"id"`
-			Name   string `json:"nameTRA"`
-			Icon   string `json:"augmentSmallIconPath"`
-			Rarity string `json:"rarity"`
-		}
+		var rows []cherryRow
 		if json.Unmarshal(b, &rows) == nil {
 			for _, r := range rows {
-				m.names[r.ID] = r.Name
+				m.namesEN[r.ID] = r.Name
 				m.rarity[r.ID] = strings.ToLower(strings.TrimPrefix(r.Rarity, "k"))
 				p := strings.ToLower(strings.TrimPrefix(r.Icon, "/lol-game-data/assets/"))
 				if p != "" {
@@ -297,46 +308,80 @@ func (c *Community) loadMeta(ctx context.Context, patch string) *augmentMeta {
 			}
 		}
 	}
-	if b, err := c.fetch(ctx, "blitz-augments-"+patch+".json", "https://utils.iesdev.com/static/json/lol/mayham/"+patch+"/augments_en_us", 24*time.Hour); err == nil {
-		var rows map[string]struct {
-			ID          int    `json:"id"`
-			DisplayName string `json:"displayName"`
-			Description string `json:"description"`
-		}
+	if b, err := c.fetch(ctx, "cherry-augments.zh_cn.json", cdragonZH+"v1/cherry-augments.json", 24*time.Hour); err == nil {
+		var rows []cherryRow
 		if json.Unmarshal(b, &rows) == nil {
 			for _, r := range rows {
-				m.descs[r.ID] = stripTags(r.Description)
-				if m.names[r.ID] == "" {
-					m.names[r.ID] = r.DisplayName
+				if r.Name != "" {
+					m.names[r.ID] = r.Name
 				}
 			}
 		}
 	}
+	for _, loc := range blitzLocales {
+		b, err := c.fetch(ctx, "blitz-augments-"+loc+"-"+patch+".json", "https://utils.iesdev.com/static/json/lol/mayham/"+patch+"/augments_"+loc, 24*time.Hour)
+		if err != nil {
+			continue
+		}
+		m.mergeBlitz(b, loc)
+	}
+	m.fillNames()
 	c.meta = m
 	return m
 }
 
-// stripTags drops <tags> and %i:placeholder% tokens from augment descriptions.
-func stripTags(s string) string {
-	var b strings.Builder
-	inTag, inVar := false, false
-	for _, r := range s {
-		switch {
-		case r == '<':
-			inTag = true
-		case r == '>':
-			inTag = false
-		case r == '%' && !inVar:
-			inVar = true
-			b.WriteString("X")
-		case r == '%' && inVar:
-			inVar = false
-		case !inTag && !inVar:
-			b.WriteRune(r)
+// mergeBlitz adds blitz descriptions and any names CommunityDragon lacked.
+// Callers merge Chinese first, so the first description seen wins.
+func (m *augmentMeta) mergeBlitz(b []byte, loc string) {
+	var rows map[string]struct {
+		ID          int    `json:"id"`
+		DisplayName string `json:"displayName"`
+		Description string `json:"description"`
+	}
+	if json.Unmarshal(b, &rows) != nil {
+		return
+	}
+	names := m.names
+	if loc == "en_us" {
+		names = m.namesEN
+	}
+	for _, r := range rows {
+		// Untranslated entries carry the string key instead ("Kiwi_TapDancer_Summary").
+		if d := stripTags(r.Description); d != "" && m.descs[r.ID] == "" && !reKey.MatchString(d) {
+			m.descs[r.ID] = d
+		}
+		if names[r.ID] == "" && r.DisplayName != "" {
+			names[r.ID] = r.DisplayName
 		}
 	}
-	out := strings.ReplaceAll(b.String(), "X?", "")
-	return strings.Join(strings.Fields(out), " ")
+}
+
+// fillNames shows the English name where no Chinese one is known.
+func (m *augmentMeta) fillNames() {
+	for id, en := range m.namesEN {
+		if m.names[id] == "" {
+			m.names[id] = en
+		}
+	}
+}
+
+var (
+	reTag     = regexp.MustCompile(`<[^>]*>`)
+	reKey     = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+	reIcon    = regexp.MustCompile(`%i:[A-Za-z0-9_]+%`)
+	reCalc    = regexp.MustCompile(`@[A-Za-z0-9_.:*]+@`)
+	reSpaceCJ = regexp.MustCompile(`\s+([，。、：；！？）])`)
+)
+
+// stripTags drops <tags>, %i:icon% markers and @calc@ placeholders from augment
+// descriptions. A plain "12%" stays.
+func stripTags(s string) string {
+	s = strings.ReplaceAll(s, "<br>", " ")
+	s = reTag.ReplaceAllString(s, "")
+	s = reIcon.ReplaceAllString(s, "")
+	s = reCalc.ReplaceAllString(s, "X")
+	s = strings.Join(strings.Fields(s), " ")
+	return reSpaceCJ.ReplaceAllString(s, "$1")
 }
 
 type aramggAugStat struct {
@@ -399,10 +444,10 @@ func (c *Community) Augments(ctx context.Context, patch string, champID int) ([]
 	var out []Augment
 	for id, st := range stats {
 		games := atoi(st.NumGames)
-		a := Augment{ID: id, Name: meta.names[id], Desc: meta.descs[id], Rarity: meta.rarity[id], Icon: meta.icons[id],
+		a := Augment{ID: id, Name: meta.names[id], NameEN: meta.namesEN[id], Desc: meta.descs[id], Rarity: meta.rarity[id], Icon: meta.icons[id],
 			Tier: atoi(st.Tier), WinRate: atof(st.WinRate), PickRate: atof(st.PickRate), Games: games, Scope: scope}
 		if a.Name == "" {
-			a.Name = "Augment " + strconv.Itoa(id)
+			a.Name = "强化 #" + strconv.Itoa(id)
 		}
 		if a.Rarity == "" {
 			a.Rarity = "unknown"
@@ -716,24 +761,15 @@ func (c *Community) arenaGlobal(ctx context.Context) map[int]blitzArenaAug {
 // icons/rarity from CommunityDragon.
 func (c *Community) arenaMeta(ctx context.Context, patch string) *augmentMeta {
 	m := c.loadMeta(ctx, patch) // CDragon names/icons/rarity cover Arena ids too
-	if b, err := c.fetch(ctx, "blitz-arena-meta-"+patch+".json", "https://utils.iesdev.com/static/json/lol/arena/"+patch+"/augments_en_us", 24*time.Hour); err == nil {
-		var rows map[string]struct {
-			ID          int    `json:"id"`
-			DisplayName string `json:"displayName"`
-			Description string `json:"description"`
+	for _, loc := range blitzLocales {
+		b, err := c.fetch(ctx, "blitz-arena-meta-"+loc+"-"+patch+".json", "https://utils.iesdev.com/static/json/lol/arena/"+patch+"/augments_"+loc, 24*time.Hour)
+		if err != nil {
+			continue
 		}
-		if json.Unmarshal(b, &rows) == nil {
-			c.mu.Lock()
-			for _, r := range rows {
-				if r.Description != "" {
-					m.descs[r.ID] = stripTags(r.Description)
-				}
-				if m.names[r.ID] == "" {
-					m.names[r.ID] = r.DisplayName
-				}
-			}
-			c.mu.Unlock()
-		}
+		c.mu.Lock()
+		m.mergeBlitz(b, loc)
+		m.fillNames()
+		c.mu.Unlock()
 	}
 	return m
 }
@@ -751,7 +787,7 @@ func (c *Community) ArenaAugments(ctx context.Context, patch string, champID int
 				if a.Play == 0 {
 					continue
 				}
-				aug := Augment{ID: a.ID, Name: meta.names[a.ID], Desc: meta.descs[a.ID], Rarity: meta.rarity[a.ID], Icon: meta.icons[a.ID],
+				aug := Augment{ID: a.ID, Name: meta.names[a.ID], NameEN: meta.namesEN[a.ID], Desc: meta.descs[a.ID], Rarity: meta.rarity[a.ID], Icon: meta.icons[a.ID],
 					WinRate: float64(a.Win) / float64(a.Play), PickRate: a.PickRate, Games: a.Play, Scope: scope,
 					AvgPlace: float64(a.TotalPlace) / float64(a.Play), Top1: float64(a.FirstPlace) / float64(a.Play)}
 				if gb, ok := global[a.ID]; ok {
@@ -767,13 +803,13 @@ func (c *Community) ArenaAugments(ctx context.Context, patch string, champID int
 	if len(out) == 0 {
 		scope = "global"
 		for id, gb := range global {
-			out = append(out, Augment{ID: id, Name: meta.names[id], Desc: meta.descs[id], Rarity: meta.rarity[id], Icon: meta.icons[id],
+			out = append(out, Augment{ID: id, Name: meta.names[id], NameEN: meta.namesEN[id], Desc: meta.descs[id], Rarity: meta.rarity[id], Icon: meta.icons[id],
 				Tier: gb.Tier, AvgPlace: gb.AvgPlace, Top1: gb.Top1, Games: gb.Games, Scope: scope})
 		}
 	}
 	for i := range out {
 		if out[i].Name == "" {
-			out[i].Name = "Augment " + strconv.Itoa(out[i].ID)
+			out[i].Name = "强化 #" + strconv.Itoa(out[i].ID)
 		}
 		if out[i].Rarity == "" {
 			out[i].Rarity = "unknown"
@@ -840,4 +876,26 @@ func (c *Community) ArenaTiers(ctx context.Context) (map[int]ArenaTier, error) {
 			AvgPlace: float64(st.TotalPlace) / float64(st.Play), Top1: float64(st.FirstPlace) / float64(st.Play)}
 	}
 	return out, nil
+}
+
+// AugmentInfo returns name, icon, rarity and description (no stats) for augment ids.
+func (c *Community) AugmentInfo(ctx context.Context, patch string, ids []int) map[int]Augment {
+	out := map[int]Augment{}
+	if len(ids) == 0 {
+		return out
+	}
+	m := c.loadMeta(ctx, patch)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, id := range ids {
+		a := Augment{ID: id, Name: m.names[id], NameEN: m.namesEN[id], Desc: m.descs[id], Rarity: m.rarity[id], Icon: m.icons[id]}
+		if a.Name == "" {
+			a.Name = "强化 #" + strconv.Itoa(id)
+		}
+		if a.Rarity == "" {
+			a.Rarity = "unknown"
+		}
+		out[id] = a
+	}
+	return out
 }

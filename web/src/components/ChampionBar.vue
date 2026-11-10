@@ -16,8 +16,9 @@ const follow = defineModel<boolean>('follow', { default: true })
 const build = computed(() => s.build)
 const info = computed(() => s.info)
 const me = computed(() => s.me)
-const DMG: Record<string, string> = { kMagic: 'AP', kPhysical: 'AD', kMixed: 'Mixed' }
-const ATK: Record<string, string> = { kRanged: 'ranged', kMelee: 'melee' }
+const DMG: Record<string, string> = { kMagic: '法术', kPhysical: '物理', kMixed: '混合' }
+const ATK: Record<string, string> = { kRanged: '远程', kMelee: '近战' }
+const PIP_LABEL: Record<string, string> = { damage: '伤害', durability: '坦度', crowdControl: '控制', mobility: '机动', utility: '功能' }
 const PIPS = ['damage', 'durability', 'crowdControl', 'mobility', 'utility'] as const
 
 // Champion picker dropdown
@@ -100,29 +101,29 @@ const games = (r: string) => build.value?.roles?.find((x) => x.role === r)?.game
       <div class="load-card">
         <img :src="s.loadingChamp.image" :alt="s.loadingChamp.name" />
         <div class="load-name">{{ s.loadingChamp.name }}</div>
-        <div class="load-sub">Loading build…</div>
+        <div class="load-sub">正在加载出装…</div>
         <div class="spinner" />
       </div>
     </div>
   </Teleport>
 
-  <section ref="root" class="panel champbar" :class="{ compact, empty: !build }" aria-label="Champion">
+  <section ref="root" class="panel champbar" :class="{ compact, empty: !build }" aria-label="英雄">
     <template v-if="build">
-      <button type="button" class="who-btn" :class="{ open: pickerOpen }" :aria-expanded="pickerOpen" aria-haspopup="dialog" title="Search for another champion" @click="pickerOpen = !pickerOpen">
+      <button type="button" class="who-btn" :class="{ open: pickerOpen }" :aria-expanded="pickerOpen" aria-haspopup="dialog" title="换一个英雄" @click="pickerOpen = !pickerOpen">
         <img class="portrait" :src="build.champion.image" alt="" />
         <span class="who">
           <span class="name">{{ build.champion.name }}<i class="chev" :class="{ up: pickerOpen }" /></span>
           <span class="title">
-            {{ build.champion.title }} · patch {{ patchOf(build.patch) }}<span v-if="build.mode === 'aram'"> · Howling Abyss</span><span v-else-if="build.mode === 'arena'"> · Arena</span>
+            {{ build.champion.title }} · 版本 {{ patchOf(build.patch) }}<span v-if="build.mode === 'aram'"> · 大乱斗</span><span v-else-if="build.mode === 'arena'"> · 斗魂竞技场</span>
           </span>
         </span>
       </button>
       <div class="rows">
         <div class="row1">
           <div class="roles">
-            <button :class="{ active: build.mode === 'sr' }" @click="pickMode('sr')">Rift</button>
-            <button :class="{ active: build.mode === 'aram' }" @click="pickMode('aram')">ARAM</button>
-            <button :class="{ active: build.mode === 'arena' }" @click="pickMode('arena')">Arena</button>
+            <button :class="{ active: build.mode === 'sr' }" @click="pickMode('sr')">召唤师峡谷</button>
+            <button :class="{ active: build.mode === 'aram' }" @click="pickMode('aram')">大乱斗</button>
+            <button :class="{ active: build.mode === 'arena' }" @click="pickMode('arena')">斗魂竞技场</button>
             <template v-if="build.mode !== 'aram' && build.mode !== 'arena'">
               <span class="sep" />
               <button v-for="r in ROLES" :key="r" class="sm" :class="{ active: s.role === r }" @click="pickRole(r)">
@@ -132,19 +133,19 @@ const games = (r: string) => build.value?.roles?.find((x) => x.role === r)?.game
           </div>
           <div class="facts">
             <span class="badge" :class="build.source">
-              {{ build.source === 'opgg' ? (build.mode === 'arena' ? 'op.gg Arena stats' : build.mode === 'aram' ? 'op.gg ARAM stats' : 'op.gg ranked stats') : build.source === 'riot' ? 'Compiled from ranked matches' : build.source === 'lcu' ? 'Riot in-client recommendations' : 'No data' }}
+              {{ build.source === 'opgg' ? (build.mode === 'arena' ? 'op.gg 斗魂竞技场数据' : build.mode === 'aram' ? 'op.gg 大乱斗数据' : 'op.gg 排位数据') : build.source === 'riot' ? '自行统计的排位对局' : build.source === 'lcu' ? '客户端官方推荐' : '暂无数据' }}
             </span>
-            <span v-if="build.tier" class="badge tier" :class="'t' + build.tier">Tier {{ tierLabel(build.tier) }} · #{{ build.rank }}<template v-if="build.pickRate"> · {{ pctf(build.pickRate) }} pick</template></span>
-            <span v-if="build.total.games && build.mode !== 'arena'" class="muted">{{ build.total.games }} games · {{ winrate(build.total) }} win rate</span>
-            <span v-else-if="build.total.games" class="muted">{{ build.total.games }} games · avg place {{ (build.avgPlace ?? 0).toFixed(2) }} · {{ pctf(build.top1 ?? 0) }} first</span>
+            <span v-if="build.tier" class="badge tier" :class="'t' + build.tier">{{ tierLabel(build.tier) }} 级 · 第 {{ build.rank }} 名<template v-if="build.pickRate"> · 选取率 {{ pctf(build.pickRate) }}</template></span>
+            <span v-if="build.total.games && build.mode !== 'arena'" class="muted">{{ build.total.games }} 场 · 胜率 {{ winrate(build.total) }}</span>
+            <span v-else-if="build.total.games" class="muted">{{ build.total.games }} 场 · 平均名次 {{ (build.avgPlace ?? 0).toFixed(2) }} · 第一 {{ pctf(build.top1 ?? 0) }}</span>
           </div>
         </div>
         <div class="row2">
           <div class="facts">
-            <span v-if="me?.mastery" class="badge lcu" :title="`Highest grade ${me.mastery.highestGrade}`">You: M{{ me.mastery.championLevel }} · {{ fmtPoints(me.mastery.championPoints) }}</span>
+            <span v-if="me?.mastery" class="badge lcu" :title="`最高评分 ${me.mastery.highestGrade}`">你的熟练度：{{ me.mastery.championLevel }} 级 · {{ fmtPoints(me.mastery.championPoints) }}</span>
             <span v-if="me?.record" class="badge riot">
-              Recent {{ build.mode === 'aram' ? 'ARAM' : 'Rift' }}: {{ me.record.wins }}W {{ me.record.games - me.record.wins }}L ·
-              {{ ((me.record.kills + me.record.assists) / Math.max(1, me.record.deaths)).toFixed(1) }} KDA
+              最近{{ build.mode === 'aram' ? '大乱斗' : '峡谷' }}：{{ me.record.wins }}胜 {{ me.record.games - me.record.wins }}负 ·
+              KDA {{ ((me.record.kills + me.record.assists) / Math.max(1, me.record.deaths)).toFixed(1) }}
             </span>
           </div>
           <div v-if="info && !compact" class="playstyle">
@@ -152,7 +153,7 @@ const games = (r: string) => build.value?.roles?.find((x) => x.role === r)?.game
               {{ DMG[info.tacticalInfo.damageType] ?? '?' }} · {{ ATK[info.tacticalInfo.attackType] ?? info.tacticalInfo.attackType }} · {{ (info.roles ?? []).join(', ') }}
             </span>
             <div v-for="k in PIPS" :key="k" class="ps">
-              <span class="lbl">{{ k === 'crowdControl' ? 'CC' : k }}</span>
+              <span class="lbl">{{ PIP_LABEL[k] }}</span>
               <span class="pips"><i v-for="n in 3" :key="n" :class="{ on: n <= info.playstyleInfo[k] }" /></span>
             </div>
           </div>
@@ -161,26 +162,26 @@ const games = (r: string) => build.value?.roles?.find((x) => x.role === r)?.game
           <span v-for="n in build.notes" :key="n" class="note">{{ n }}</span>
         </div>
       </div>
-      <button type="button" role="switch" class="toggle follow" :class="{ on: follow }" :aria-checked="follow" title="Switch the build to whatever you lock in or play" @click="follow = !follow">
-        <span class="track" aria-hidden="true" /><span class="muted">Follow</span>
+      <button type="button" role="switch" class="toggle follow" :class="{ on: follow }" :aria-checked="follow" title="选英雄锁定后或进游戏后，自动切到你在玩的英雄" @click="follow = !follow">
+        <span class="track" aria-hidden="true" /><span class="muted">自动跟随</span>
       </button>
     </template>
-    <template v-else-if="s.loading"><div class="muted">Loading build…</div></template>
+    <template v-else-if="s.loading"><div class="muted">正在加载出装…</div></template>
     <template v-else-if="champion">
       <button type="button" class="who-btn" :aria-expanded="pickerOpen" aria-haspopup="dialog" @click="pickerOpen = !pickerOpen">
         <img class="portrait" :src="champion.image" alt="" />
         <span class="who">
           <span class="name">{{ champion.name }}<i class="chev" :class="{ up: pickerOpen }" /></span>
-          <span class="title">{{ s.error || 'No build data' }}</span>
+          <span class="title">{{ s.error || '暂无出装数据' }}</span>
         </span>
       </button>
-      <button @click="loadBuild(champion)">Retry</button>
+      <button @click="loadBuild(champion)">重试</button>
     </template>
     <template v-else>
       <button type="button" class="who-btn" :aria-expanded="pickerOpen" aria-haspopup="dialog" @click="pickerOpen = !pickerOpen">
         <span class="who">
-          <span class="name">Pick a champion<i class="chev" :class="{ up: pickerOpen }" /></span>
-          <span class="title">Search here, or lock in during champ select and the build follows automatically.</span>
+          <span class="name">选择英雄<i class="chev" :class="{ up: pickerOpen }" /></span>
+          <span class="title">点这里搜索；或者在选英雄时锁定，出装会自动切过去。</span>
         </span>
       </button>
     </template>

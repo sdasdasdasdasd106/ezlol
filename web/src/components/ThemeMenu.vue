@@ -42,7 +42,7 @@ onUnmounted(() => {
 
 <template>
   <div ref="root" class="tm">
-    <button class="tm-btn" :aria-expanded="open" aria-haspopup="listbox" title="Theme" @click="open = !open">
+    <button class="tm-btn" :aria-expanded="open" aria-haspopup="listbox" title="主题" @click="open = !open">
       <span class="sw"><i :style="{ background: current().swatch[0] }" /><i :style="{ background: current().swatch[1] }" /><i :style="{ background: current().swatch[2] }" /></span>
       <span class="lbl">{{ current().label }}</span>
       <span class="chev" :class="{ up: open }" />

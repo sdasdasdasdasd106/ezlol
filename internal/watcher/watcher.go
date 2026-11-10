@@ -1,4 +1,4 @@
-// Package watcher polls the League client and auto-accepts queue pops.
+// Package watcher polls the League client: connection, game phase, queue and the picked champion.
 package watcher
 
 import (
@@ -15,23 +15,19 @@ import (
 
 // Status is a snapshot of what the watcher knows.
 type Status struct {
-	Connected      bool            `json:"connected"`
-	Phase          string          `json:"phase"`
-	AutoAccept     bool            `json:"autoAccept"`
-	Summoner       string          `json:"summoner"`
-	GameVersion    string          `json:"gameVersion"`
-	Patch          string          `json:"patch"`
-	ReadyCheck     *lcu.ReadyCheck `json:"readyCheck,omitempty"`
-	LastAccept     *time.Time      `json:"lastAccept,omitempty"`
-	AcceptCount    int             `json:"acceptCount"`
-	QueueID        int             `json:"queueId"`
-	QueueName      string          `json:"queueName"`
-	MapID          int             `json:"mapId"`
-	GameMode       string          `json:"gameMode"`
-	PickedChampion int             `json:"pickedChampion"`
-	PickedPosition string          `json:"pickedPosition"`
-	Error          string          `json:"error,omitempty"`
-	UpdatedAt      time.Time       `json:"updatedAt"`
+	Connected      bool      `json:"connected"`
+	Phase          string    `json:"phase"`
+	Summoner       string    `json:"summoner"`
+	GameVersion    string    `json:"gameVersion"`
+	Patch          string    `json:"patch"`
+	QueueID        int       `json:"queueId"`
+	QueueName      string    `json:"queueName"`
+	MapID          int       `json:"mapId"`
+	GameMode       string    `json:"gameMode"`
+	PickedChampion int       `json:"pickedChampion"`
+	PickedPosition string    `json:"pickedPosition"`
+	Error          string    `json:"error,omitempty"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 // LogEntry is a user-visible event line.
@@ -60,23 +56,15 @@ type Watcher struct {
 	fails    int
 }
 
-// New creates a watcher. Auto-accept is read from and persisted to the settings store.
+// New creates a watcher. It never touches the queue: no auto-accept.
 func New(log *slog.Logger, interval time.Duration, st *settings.Store) *Watcher {
 	w := &Watcher{
-		status:   Status{AutoAccept: st.Get().AutoAccept},
 		subs:     map[chan Event]struct{}{},
 		interval: interval,
 		log:      log,
 		settings: st,
 	}
 	return w
-}
-
-func (w *Watcher) saveSettings() {
-	on := w.Status().AutoAccept
-	if err := w.settings.Update(func(s *settings.Settings) { s.AutoAccept = on }); err != nil {
-		w.log.Warn("settings save failed", "err", err)
-	}
 }
 
 // Client returns the current LCU client, or nil when disconnected.
@@ -100,30 +88,6 @@ func (w *Watcher) Logs() []LogEntry {
 	out := make([]LogEntry, len(w.logs))
 	copy(out, w.logs)
 	return out
-}
-
-// SetAutoAccept toggles auto-accept.
-func (w *Watcher) SetAutoAccept(on bool) {
-	w.mu.Lock()
-	w.status.AutoAccept = on
-	w.mu.Unlock()
-	w.addLog("info", map[bool]string{true: "auto-accept enabled", false: "auto-accept disabled"}[on])
-	w.publishStatus()
-	w.saveSettings()
-}
-
-// Accept manually accepts the current ready check.
-func (w *Watcher) Accept(ctx context.Context) error {
-	c := w.Client()
-	if c == nil {
-		return lcu.ErrNotRunning
-	}
-	if err := c.AcceptReadyCheck(ctx); err != nil {
-		w.addLog("error", "accept failed: "+err.Error())
-		return err
-	}
-	w.recordAccept("accepted queue (manual)")
-	return nil
 }
 
 // Subscribe returns a channel of events plus an unsubscribe func.
@@ -168,16 +132,6 @@ func (w *Watcher) addLog(level, msg string) {
 	w.publish(Event{Type: "log", Data: b})
 }
 
-func (w *Watcher) recordAccept(msg string) {
-	now := time.Now()
-	w.mu.Lock()
-	w.status.LastAccept = &now
-	w.status.AcceptCount++
-	w.mu.Unlock()
-	w.addLog("accept", msg)
-	w.publishStatus()
-}
-
 // Run blocks, polling until ctx is done.
 func (w *Watcher) Run(ctx context.Context) {
 	t := time.NewTicker(w.interval)
@@ -204,7 +158,6 @@ func (w *Watcher) tick(ctx context.Context) {
 		if err != nil {
 			next.Connected = false
 			next.Phase = ""
-			next.ReadyCheck = nil
 			w.setStatus(next, prev)
 			return
 		}
@@ -245,7 +198,6 @@ func (w *Watcher) tick(ctx context.Context) {
 		w.mu.Unlock()
 		next.Connected = false
 		next.Phase = ""
-		next.ReadyCheck = nil
 		next.PickedChampion = 0
 		w.addLog("warn", "lost connection to League client")
 		w.setStatus(next, prev)
@@ -269,24 +221,6 @@ func (w *Watcher) tick(ctx context.Context) {
 		}
 	}
 
-	next.ReadyCheck = nil
-	if phase == "ReadyCheck" {
-		rc, err := c.ReadyCheckState(ctx)
-		if err == nil && rc != nil {
-			next.ReadyCheck = rc
-			if next.AutoAccept && rc.State == "InProgress" && rc.PlayerResponse == "None" {
-				if err := c.AcceptReadyCheck(ctx); err != nil {
-					w.addLog("error", "auto-accept failed: "+err.Error())
-				} else {
-					rc.PlayerResponse = "Accepted"
-					w.setStatus(next, prev)
-					w.recordAccept("queue popped, auto-accepted")
-					return
-				}
-			}
-		}
-	}
-
 	if phase == "ChampSelect" {
 		if id, pos, err := c.ChampSelectPick(ctx); err == nil {
 			if id != next.PickedChampion && id != 0 {
@@ -305,9 +239,6 @@ func (w *Watcher) tick(ctx context.Context) {
 
 func (w *Watcher) setStatus(next, prev Status) {
 	w.mu.Lock()
-	next.AutoAccept = w.status.AutoAccept // may have been toggled concurrently
-	next.AcceptCount = w.status.AcceptCount
-	next.LastAccept = w.status.LastAccept
 	w.status = next
 	w.mu.Unlock()
 	if statusChanged(prev, next) {
@@ -319,12 +250,6 @@ func statusChanged(a, b Status) bool {
 	if a.Connected != b.Connected || a.Phase != b.Phase || a.Error != b.Error ||
 		a.PickedChampion != b.PickedChampion || a.PickedPosition != b.PickedPosition ||
 		a.Summoner != b.Summoner || a.Patch != b.Patch || a.QueueID != b.QueueID || a.MapID != b.MapID {
-		return true
-	}
-	if (a.ReadyCheck == nil) != (b.ReadyCheck == nil) {
-		return true
-	}
-	if a.ReadyCheck != nil && *a.ReadyCheck != *b.ReadyCheck {
 		return true
 	}
 	return false

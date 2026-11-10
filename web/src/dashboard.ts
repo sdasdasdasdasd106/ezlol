@@ -23,39 +23,28 @@ type Pos = { x: number; y: number; w: number; h: number }
 const P = (x: number, y: number, w: number, h: number): Pos => ({ x, y, w, h })
 
 /**
- * Built-in arrangements. Columns: left 3 | centre 6 | right 3 (12-column grid,
- * rows of 40px). The champion card is a fixed bar above the grid, not a box.
- * Boxes that never coexist may share a slot.
+ * Built-in arrangements (12-column grid, rows of 40px). The champion card is a
+ * fixed bar above the grid, not a box. Boxes that never coexist may share a slot.
  */
-const BUILD_IDLE: Record<string, Pos> = {
-  items: P(3, 0, 3, 12), spells: P(3, 12, 3, 12), runes: P(6, 0, 3, 12), boots: P(6, 12, 3, 12),
-  'aug-prismatic': P(9, 0, 3, 9), 'aug-gold': P(9, 9, 3, 9), 'aug-silver': P(9, 18, 3, 9),
-  prismatic: P(9, 27, 3, 10), synergies: P(9, 37, 3, 10),
+const BUILD_ROW: Record<string, Pos> = {
+  items: P(0, 0, 3, 12), boots: P(3, 0, 3, 12), runes: P(6, 0, 3, 12), spells: P(9, 0, 3, 12),
+  'aug-prismatic': P(0, 12, 3, 9), 'aug-gold': P(3, 12, 3, 9), 'aug-silver': P(6, 12, 3, 9),
+  prismatic: P(9, 12, 3, 10), synergies: P(9, 22, 3, 10),
 }
-const LIVE_RIGHT: Record<string, Pos> = { 'live-you': P(9, 0, 3, 8), 'live-shopping': P(9, 8, 3, 12), 'live-killfeed': P(9, 20, 3, 12) }
-// Build block under the two team boxes: items | runes, then spells | boots.
-const BUILD_UNDER_TEAMS: Record<string, Pos> = { items: P(3, 20, 3, 12), runes: P(6, 20, 3, 12), spells: P(3, 32, 3, 10), boots: P(6, 32, 3, 12) }
 export const DEFAULT_LAYOUTS: Record<ModeKey, Record<string, Pos>> = {
-  idle: { queue: P(0, 0, 3, 18), compile: P(0, 18, 3, 6), postgame: P(3, 24, 6, 12), ...BUILD_IDLE },
-  // Champ select itself is a fixed bar above the grid; the grid holds the build.
-  select: {
-    items: P(0, 0, 3, 12), boots: P(3, 0, 3, 12), runes: P(6, 0, 3, 12), spells: P(9, 0, 3, 12),
-    'aug-prismatic': P(0, 12, 3, 9), 'aug-gold': P(3, 12, 3, 9), 'aug-silver': P(6, 12, 3, 9),
-    prismatic: P(9, 12, 3, 10), synergies: P(9, 22, 3, 10),
-  },
-  'game-rift': {
-    'live-status': P(0, 0, 3, 8), 'live-objectives': P(0, 8, 3, 9), 'live-matchup': P(0, 17, 3, 9),
-    'live-enemies': P(3, 0, 6, 10), 'live-allies': P(3, 10, 6, 10), ...BUILD_UNDER_TEAMS, ...LIVE_RIGHT,
-  },
+  idle: { ...BUILD_ROW, compile: P(0, 21, 3, 6), 'aug-build': P(3, 21, 6, 12) },
+  select: { ...BUILD_ROW, 'aug-build': P(0, 21, 6, 12) },
+  'game-rift': { items: P(0, 0, 3, 12), boots: P(3, 0, 3, 12), runes: P(6, 0, 3, 12), spells: P(9, 0, 3, 12) },
   'game-aram': {
-    'live-status': P(0, 0, 3, 8), 'aug-prismatic': P(0, 8, 3, 9), 'aug-gold': P(0, 17, 3, 9), 'aug-silver': P(0, 26, 3, 9),
-    'live-enemies': P(3, 0, 6, 10), 'live-allies': P(3, 10, 6, 10), ...BUILD_UNDER_TEAMS, ...LIVE_RIGHT,
+    'augment-assist': P(0, 0, 6, 14), 'aug-build': P(6, 0, 6, 12),
+    'aug-prismatic': P(0, 14, 3, 10), 'aug-gold': P(3, 14, 3, 10), 'aug-silver': P(0, 24, 3, 10),
+    items: P(6, 12, 3, 12), runes: P(9, 12, 3, 12), spells: P(6, 24, 3, 10), boots: P(9, 24, 3, 12),
   },
   'game-arena': {
-    'live-status': P(0, 0, 3, 8), prismatic: P(0, 8, 3, 10), synergies: P(0, 18, 3, 10), 'aug-prismatic': P(0, 28, 3, 9),
-    'arena-mine': P(3, 0, 6, 7), 'arena-teams': P(3, 7, 6, 24),
-    items: P(3, 31, 3, 12), boots: P(6, 31, 3, 12), spells: P(3, 43, 3, 10), runes: P(6, 43, 3, 10),
-    'live-you': P(9, 0, 3, 8), 'live-shopping': P(9, 8, 3, 8), 'live-killfeed': P(9, 16, 3, 8), 'aug-gold': P(9, 24, 3, 9), 'aug-silver': P(9, 33, 3, 9),
+    'augment-assist': P(0, 0, 6, 10),
+    'aug-prismatic': P(0, 10, 3, 10), 'aug-gold': P(3, 10, 3, 10), 'aug-silver': P(0, 20, 3, 10),
+    prismatic: P(6, 0, 3, 10), synergies: P(9, 0, 3, 10), items: P(6, 10, 3, 12), boots: P(9, 10, 3, 12),
+    spells: P(3, 20, 3, 10), runes: P(6, 22, 3, 10),
   },
 }
 
@@ -68,70 +57,46 @@ export interface WidgetSpec {
   when?: string
 }
 const BUILD_WIDGETS: WidgetSpec[] = [
-  { id: 'items', title: 'Items', w: 3, h: 12 },
-  { id: 'boots', title: 'Boots & late items', w: 3, h: 12 },
-  { id: 'runes', title: 'Runes', w: 3, h: 10 },
-  { id: 'spells', title: 'Spells & skills', w: 3, h: 10 },
+  { id: 'items', title: '出装', w: 3, h: 12 },
+  { id: 'boots', title: '鞋子与后期装', w: 3, h: 12 },
+  { id: 'runes', title: '符文', w: 3, h: 10 },
+  { id: 'spells', title: '召唤师技能与加点', w: 3, h: 10 },
 ]
 const AUG_WIDGETS: WidgetSpec[] = [
-  { id: 'aug-prismatic', title: 'Prismatic augments', w: 3, h: 9 },
-  { id: 'aug-gold', title: 'Gold augments', w: 3, h: 9 },
-  { id: 'aug-silver', title: 'Silver augments', w: 3, h: 9 },
+  { id: 'aug-prismatic', title: '棱彩强化', w: 3, h: 9 },
+  { id: 'aug-gold', title: '金色强化', w: 3, h: 9 },
+  { id: 'aug-silver', title: '银色强化', w: 3, h: 9 },
 ]
 const ARENA_BUILD: WidgetSpec[] = [
-  { id: 'prismatic', title: 'Prismatic items', w: 3, h: 10 },
-  { id: 'synergies', title: 'Best partners', w: 3, h: 10 },
+  { id: 'prismatic', title: '棱彩装备', w: 3, h: 10 },
+  { id: 'synergies', title: '最佳队友', w: 3, h: 10 },
 ]
-const LIVE_COMMON: WidgetSpec[] = [
-  { id: 'live-status', title: 'Live', w: 3, h: 8 },
-  { id: 'live-you', title: 'You', w: 3, h: 8 },
-  { id: 'live-shopping', title: 'Shopping', w: 3, h: 8 },
-  { id: 'live-killfeed', title: 'Kill feed', w: 3, h: 8 },
-]
+const ASSIST: WidgetSpec = { id: 'augment-assist', title: '强化推荐', w: 6, h: 14 }
+const AUG_BUILD: WidgetSpec = { id: 'aug-build', title: '强化出装', w: 6, h: 12 }
 export const CATALOG: Record<ModeKey, WidgetSpec[]> = {
   idle: [
-    { id: 'queue', title: 'Queue watcher', w: 3, h: 18 },
-    { id: 'postgame', title: 'Post-game', w: 6, h: 12, when: 'after a game' },
     ...BUILD_WIDGETS,
-    ...AUG_WIDGETS.map((w) => ({ ...w, when: 'ARAM / Arena build' })),
-    ...ARENA_BUILD.map((w) => ({ ...w, when: 'Arena build' })),
-    { id: 'compile', title: 'Build data', w: 3, h: 6 },
+    ...AUG_WIDGETS.map((w) => ({ ...w, when: '大乱斗 / 斗魂竞技场出装' })),
+    ...ARENA_BUILD.map((w) => ({ ...w, when: '斗魂竞技场出装' })),
+    { id: 'compile', title: '出装数据统计', w: 3, h: 6 },
+    { ...AUG_BUILD, when: '大乱斗出装' },
   ],
   select: [
     ...BUILD_WIDGETS,
-    ...AUG_WIDGETS.map((w) => ({ ...w, when: 'ARAM / Arena' })),
-    ...ARENA_BUILD.map((w) => ({ ...w, when: 'Arena' })),
+    ...AUG_WIDGETS.map((w) => ({ ...w, when: '大乱斗 / 斗魂竞技场' })),
+    ...ARENA_BUILD.map((w) => ({ ...w, when: '斗魂竞技场' })),
+    { ...AUG_BUILD, when: '大乱斗' },
   ],
-  'game-rift': [
-    ...LIVE_COMMON,
-    { id: 'live-enemies', title: 'Enemies', w: 6, h: 10 },
-    { id: 'live-allies', title: 'Your team', w: 6, h: 10 },
-    { id: 'live-objectives', title: 'Objectives', w: 3, h: 9 },
-    { id: 'live-matchup', title: 'Matchup', w: 3, h: 9, when: 'lane opponent known' },
-    ...BUILD_WIDGETS,
-  ],
-  'game-aram': [
-    ...LIVE_COMMON,
-    { id: 'live-enemies', title: 'Enemies', w: 6, h: 10 },
-    { id: 'live-allies', title: 'Your team', w: 6, h: 10 },
-    ...BUILD_WIDGETS,
-    ...AUG_WIDGETS.map((w) => ({ ...w, when: 'ARAM Mayhem' })),
-  ],
-  'game-arena': [
-    ...LIVE_COMMON,
-    { id: 'arena-mine', title: 'Your team (Arena)', w: 6, h: 7, when: 'after the first fights' },
-    { id: 'arena-teams', title: 'Enemy teams (Arena)', w: 6, h: 24, when: 'after the first fights' },
-    ...BUILD_WIDGETS,
-    ...ARENA_BUILD,
-    ...AUG_WIDGETS,
-  ],
+  'game-rift': [...BUILD_WIDGETS],
+  'game-aram': [ASSIST, AUG_BUILD, ...BUILD_WIDGETS, ...AUG_WIDGETS.map((w) => ({ ...w, when: '海克斯乱斗' }))],
+  'game-arena': [ASSIST, ...BUILD_WIDGETS, ...ARENA_BUILD, ...AUG_WIDGETS],
 }
 
 const COLUMNS = 12
 const CELL = 40
 const MARGIN = 6
-const STORE = 'ezlol.layout.v4' // v4: layouts persisted before the remount fix may hold shoved positions
-const PRESET = 'ezlol.layout.preset.v3' // user-saved arrangements, restored by Reset
+const STORE = 'ezlol.layout.v6' // v6: augment build box
+const PRESET = 'ezlol.layout.preset.v4' // user-saved arrangements, restored by Reset
 
 type Layouts = Record<string, Record<string, Pos>>
 

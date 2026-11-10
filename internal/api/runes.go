@@ -14,7 +14,7 @@ import (
 func (s *Server) applyRunes(w http.ResponseWriter, r *http.Request) {
 	c := s.watcher.Client()
 	if c == nil {
-		writeErr(w, 503, "league client not running")
+		writeErr(w, 503, "英雄联盟客户端没开")
 		return
 	}
 	var body struct {
@@ -22,11 +22,11 @@ func (s *Server) applyRunes(w http.ResponseWriter, r *http.Request) {
 		Page       builds.RunePage `json:"page"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
-		writeErr(w, 400, "invalid body")
+		writeErr(w, 400, "请求格式不对")
 		return
 	}
 	if len(body.Page.Perks) != 6 || len(body.Page.Shards) != 3 || body.Page.Primary.ID == 0 || body.Page.Secondary.ID == 0 {
-		writeErr(w, 400, "page must have 6 perks, 3 shards and both styles")
+		writeErr(w, 400, "符文页不完整")
 		return
 	}
 	d := s.dd.Data()

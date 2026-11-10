@@ -14,29 +14,33 @@ const RARITIES = ['prismatic', 'gold', 'silver'] as const
 const augBy = (b: Build, r: string) => (b.augments ?? []).filter((a) => a.rarity === r).slice(0, props.compact && !s.expandAugs ? 6 : 12)
 const pctf = (x: number) => `${Math.round(x * 100)}%`
 const tierLabel = (t?: number) => (t ? ['', 'S', 'A', 'B', 'C', 'D'][t] ?? String(t) : '')
-const pct = (s: ItemSet, total: number) => (total ? `${Math.round((100 * s.games) / total)}% pick` : '')
+const pct = (s: ItemSet, total: number) => (total ? `选取 ${Math.round((100 * s.games) / total)}%` : '')
+const RARITY_LABEL: Record<string, string> = { prismatic: '棱彩', gold: '金色', silver: '银色' }
+function togglePreview(id: number) {
+  s.augPreview = s.augPreview.includes(id) ? s.augPreview.filter((x) => x !== id) : [...s.augPreview, id].slice(-4)
+}
 </script>
 
 <template>
   <template v-if="build">
     <!-- Augments: one box per rarity -->
     <Widget v-for="r in RARITIES" :key="r" :id="'aug-' + r" :w="3" class="aug-col" :class="[r, { compact }]" v-show="build.augments?.length">
-      <h2>{{ r }} augments <span class="muted" style="text-transform: none; letter-spacing: 0; margin-left: 8px">{{ build.augScope === 'champion' ? build.champion.name : 'global' }} · {{ build.mode === 'arena' ? 'op.gg + blitz' : 'aramgg' }}</span></h2>
-      <div v-for="a in augBy(build, r)" :key="a.id" class="aug" :title="a.desc">
-        <img v-if="a.icon" :src="a.icon" :alt="a.name" />
+      <h2>{{ RARITY_LABEL[r] }}强化 <span class="muted" style="text-transform: none; letter-spacing: 0; margin-left: 8px">{{ build.augScope === 'champion' ? build.champion.name : '全英雄数据' }} · {{ build.mode === 'arena' ? 'op.gg + blitz' : 'aramgg' }}</span></h2>
+      <div v-for="a in augBy(build, r)" :key="a.id" class="aug" :class="{ clickable: build.mode === 'aram', sel: s.augPreview.includes(a.id) }" :title="build.mode === 'aram' ? `${a.desc}\n（点击：在「强化出装」里看选它之后怎么出装）` : a.desc" @click="build.mode === 'aram' && togglePreview(a.id)">
+        <img v-if="a.icon" :src="a.icon" :alt="a.name" /><span v-else class="noicon" />
         <div class="aug-body">
           <div class="aug-name"><span class="tier-pip" :class="'t' + a.tier">{{ tierLabel(a.tier) || '?' }}</span>{{ a.name }}</div>
           <div class="aug-desc">{{ a.desc }}</div>
         </div>
-        <div class="stat"><b>{{ build.mode === 'arena' && a.avgPlace ? `#${a.avgPlace.toFixed(2)}` : pctf(a.winRate) }}</b>{{ a.games }}g · {{ pctf(a.pickRate) }}</div>
+        <div class="stat" :title="build.mode === 'arena' ? '平均名次 · 场次 · 选取率' : '胜率 · 场次 · 选取率'"><b>{{ build.mode === 'arena' && a.avgPlace ? `#${a.avgPlace.toFixed(2)}` : pctf(a.winRate) }}</b>{{ a.games }}场 · {{ pctf(a.pickRate) }}</div>
       </div>
-      <div v-if="!augBy(build, r).length" class="muted">no data</div>
-      <button v-if="compact && (build.augments ?? []).filter((a) => a.rarity === r).length > 6" class="sm" style="margin-top: 6px" @click="s.expandAugs = !s.expandAugs">{{ s.expandAugs ? 'Top 6' : 'Show all' }}</button>
+      <div v-if="!augBy(build, r).length" class="muted">暂无数据</div>
+      <button v-if="compact && (build.augments ?? []).filter((a) => a.rarity === r).length > 6" class="sm" style="margin-top: 6px" @click="s.expandAugs = !s.expandAugs">{{ s.expandAugs ? '只看前 6' : '显示全部' }}</button>
     </Widget>
 
     <!-- Arena: prismatic items -->
     <Widget v-if="build.prismatic?.length" id="prismatic" :w="3">
-      <h2>Prismatic items <span class="muted" style="text-transform: none; letter-spacing: 0; margin-left: 8px">lower place is better</span></h2>
+      <h2>棱彩装备 <span class="muted" style="text-transform: none; letter-spacing: 0; margin-left: 8px">平均名次越小越好</span></h2>
       <div class="sets">
         <div v-for="(s, i) in build.prismatic" :key="i" class="set">
           <div class="items"><img v-for="(it, j) in s.items" :key="j" :src="it.image" :title="it.name" /></div>
@@ -48,21 +52,21 @@ const pct = (s: ItemSet, total: number) => (total ? `${Math.round((100 * s.games
 
     <!-- Arena: partners -->
     <Widget v-if="build.synergies?.length" id="synergies" :w="3">
-      <h2>Best partners <span class="muted" style="text-transform: none; letter-spacing: 0; margin-left: 8px">teammates {{ build.champion.name }} places best with</span></h2>
+      <h2>最佳队友 <span class="muted" style="text-transform: none; letter-spacing: 0; margin-left: 8px">和 {{ build.champion.name }} 搭配名次最好</span></h2>
       <div class="sets">
         <div v-for="sy in build.synergies" :key="sy.champion.id" class="set">
           <img :src="sy.champion.image" :alt="sy.champion.name" style="width: 32px; height: 32px; border: 1px solid var(--gold-dark)" />
           <span>{{ sy.champion.name }}</span>
-          <div class="stat"><b>#{{ sy.avgPlace.toFixed(2) }}</b>{{ pctf(sy.top1) }} first · {{ sy.games }}g</div>
+          <div class="stat"><b>#{{ sy.avgPlace.toFixed(2) }}</b>第一 {{ pctf(sy.top1) }} · {{ sy.games }}场</div>
         </div>
       </div>
     </Widget>
 
     <!-- Items -->
     <Widget v-if="build.starting?.length || build.core?.length" id="items" :w="3">
-      <h2>Items</h2>
+      <h2>出装</h2>
       <template v-if="build.starting?.length">
-        <h3>Starting</h3>
+        <h3>出门装</h3>
         <div class="sets">
           <div v-for="(s, i) in build.starting" :key="i" class="set">
             <div class="items"><img v-for="(it, j) in s.items" :key="j" :src="it.image" :title="it.name" /></div>
@@ -71,7 +75,7 @@ const pct = (s: ItemSet, total: number) => (total ? `${Math.round((100 * s.games
         </div>
       </template>
       <template v-if="build.core?.length">
-        <h3>Core build</h3>
+        <h3>核心装（按顺序）</h3>
         <div class="sets">
           <div v-for="(s, i) in build.core" :key="i" class="set">
             <div class="items">
@@ -79,16 +83,16 @@ const pct = (s: ItemSet, total: number) => (total ? `${Math.round((100 * s.games
                 <span v-if="j" class="arrow">›</span><img :src="it.image" :title="it.name" />
               </template>
             </div>
-            <div class="stat"><b>{{ winrate(s) }}</b>{{ s.games }} games</div>
+            <div class="stat"><b>{{ winrate(s) }}</b>{{ s.games }} 场</div>
           </div>
         </div>
       </template>
     </Widget>
 
     <Widget v-if="build.boots?.length || build.late?.length" id="boots" :w="3">
-      <h2>Boots &amp; late items</h2>
+      <h2>鞋子与后期装</h2>
       <template v-if="build.boots?.length">
-        <h3>Boots</h3>
+        <h3>鞋子</h3>
         <div class="sets">
           <div v-for="(s, i) in build.boots" :key="i" class="set">
             <div class="items"><img v-for="(it, j) in s.items" :key="j" :src="it.image" :title="it.name" /></div>
@@ -98,12 +102,12 @@ const pct = (s: ItemSet, total: number) => (total ? `${Math.round((100 * s.games
         </div>
       </template>
       <template v-if="build.late?.length">
-        <h3>4th–6th options</h3>
+        <h3>第 4–6 件可选</h3>
         <div class="sets">
           <div v-for="(s, i) in build.late" :key="i" class="set">
             <div class="items"><img v-for="(it, j) in s.items" :key="j" :src="it.image" :title="it.name" /></div>
             <span>{{ s.items[0]?.name }}</span>
-            <div class="stat"><b>{{ winrate(s) }}</b>{{ s.games }} games</div>
+            <div class="stat"><b>{{ winrate(s) }}</b>{{ s.games }} 场</div>
           </div>
         </div>
       </template>
@@ -111,15 +115,15 @@ const pct = (s: ItemSet, total: number) => (total ? `${Math.round((100 * s.games
 
     <!-- Runes -->
     <Widget v-if="build.runes?.length" id="runes" :w="3">
-      <h2>Runes</h2>
+      <h2>符文</h2>
       <div class="runes">
         <div v-for="(p, i) in build.runes" :key="i" class="rune-page">
           <div class="trees">
             <img :src="p.primary.icon" :alt="p.primary.name" /> {{ p.primary.name }}
             <span>+</span>
             <img :src="p.secondary.icon" :alt="p.secondary.name" /> {{ p.secondary.name }}
-            <span class="badge" :class="p.source" style="margin-left: auto">{{ p.source === 'lcu' ? 'Riot rec.' : `${winrate(p)} · ${p.games}g` }}</span>
-            <button :disabled="applying || !status?.connected" title="Create this page in the League client and select it" @click="applyRunes(p)">Apply</button>
+            <span class="badge" :class="p.source" style="margin-left: auto">{{ p.source === 'lcu' ? '官方推荐' : `${winrate(p)} · ${p.games}场` }}</span>
+            <button :disabled="applying || !status?.connected" :title="status?.connected ? '在客户端里创建这页符文并选中' : '需要先打开英雄联盟客户端'" @click="applyRunes(p)">应用</button>
           </div>
           <div class="perks">
             <img v-for="(r, j) in p.perks" :key="j" :src="r.icon" :title="`${r.name}${r.desc ? ' — ' + r.desc.replace(/<[^>]+>/g, '') : ''}`" :class="{ keystone: j === 0 }" />
@@ -132,23 +136,23 @@ const pct = (s: ItemSet, total: number) => (total ? `${Math.round((100 * s.games
 
     <!-- Spells + skills -->
     <Widget v-if="build.spells?.length || build.skillOrder?.length" id="spells" :w="3">
-      <h2>Spells &amp; skills</h2>
+      <h2>召唤师技能与加点</h2>
       <template v-if="build.spells?.length">
         <div class="sets">
           <div v-for="(s, i) in (build.spells ?? []).slice(0, 2)" :key="i" class="set spells">
             <img v-for="(sp, j) in s.spells" :key="j" :src="sp.image" :title="sp.name" />
             <span>{{ s.spells.map((x) => x.name).join(' + ') }}</span>
-            <div v-if="s.games" class="stat"><b>{{ winrate(s) }}</b>{{ s.games }} games</div>
+            <div v-if="s.games" class="stat"><b>{{ winrate(s) }}</b>{{ s.games }} 场</div>
           </div>
         </div>
       </template>
       <template v-if="build.skillOrder?.length">
-        <h3>Skill max order</h3>
+        <h3>主升顺序</h3>
         <div class="sets">
           <div v-for="(s, i) in build.skillOrder" :key="i" class="set">
             <span class="skills">{{ s.order }}</span>
-            <span v-if="build.skillStart?.[i]" class="muted">start {{ build.skillStart[i].order }}</span>
-            <div class="stat"><b>{{ winrate(s) }}</b>{{ s.games }} games</div>
+            <span v-if="build.skillStart?.[i]" class="muted">前三级 {{ build.skillStart[i].order }}</span>
+            <div class="stat"><b>{{ winrate(s) }}</b>{{ s.games }} 场</div>
           </div>
         </div>
         <div v-if="build.skillPath?.length" class="path">
@@ -162,7 +166,7 @@ const pct = (s: ItemSet, total: number) => (total ? `${Math.round((100 * s.games
 <style scoped>
 .compact .aug-desc { display: none; }
 .compact .aug { padding: 3px 6px; grid-template-columns: 28px 1fr auto; }
-.compact .aug img { width: 28px; height: 28px; }
+.compact .aug img, .compact .noicon { width: 28px; height: 28px; }
 .path { display: flex; gap: 3px; flex-wrap: wrap; margin-top: 8px; }
 .lv { width: 26px; height: 32px; display: grid; place-items: center; font-family: var(--display); font-weight: 700; font-size: 12px; border: 1px solid var(--gold-deep); background: var(--surface-input); position: relative; }
 .lv i { position: absolute; top: 1px; left: 3px; font-size: 8px; font-style: normal; color: var(--dim); }
@@ -172,10 +176,14 @@ const pct = (s: ItemSet, total: number) => (total ? `${Math.round((100 * s.games
 .aug-col.silver h2 { color: var(--rarity-silver); background: linear-gradient(90deg, var(--rarity-silver-bg), transparent); }
 button.sm { padding: 4px 8px; font-size: 10px; }
 .aug { display: grid; grid-template-columns: 36px 1fr auto; gap: 8px; align-items: center; padding: 5px 6px; margin-bottom: 4px; border: 1px solid var(--line); background: var(--surface-raised); }
+.aug.clickable { cursor: pointer; }
+.aug.clickable:hover { border-color: var(--gold-deep); }
+.aug.sel { border-color: var(--hextech-2); box-shadow: inset 0 0 0 1px var(--accent-glow); }
 .aug img { width: 36px; height: 36px; border: 1px solid var(--gold-deep); background: #000; }
 .aug-body { min-width: 0; }
 .aug-name { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 6px; }
 .aug-desc { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tier-pip { font-family: var(--display); font-size: 10px; width: 16px; height: 16px; display: grid; place-items: center; border: 1px solid var(--gold-deep); color: var(--muted); }
 .tier-pip.t1 { color: #ff8a3d; border-color: #ff8a3d; } .tier-pip.t2 { color: var(--gold); border-color: var(--gold); } .tier-pip.t3 { color: var(--hextech-2); border-color: var(--hextech-dim); }
+.noicon { width: 36px; height: 36px; border: 1px solid var(--gold-deep); background: #000; }
 </style>

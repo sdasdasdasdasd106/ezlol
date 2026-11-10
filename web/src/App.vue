@@ -4,36 +4,35 @@ import { CATALOG, DASH_KEY, DashboardGrid, type ModeKey } from './dashboard'
 import GhostWidget from './components/GhostWidget.vue'
 import { api, isElectron, subscribe } from './api'
 import * as sound from './sound'
-import type { Champion, LogEntry, Status } from './types'
-import QueuePanel from './components/QueuePanel.vue'
+import type { Champion, Game, Status } from './types'
 import BuildPanel from './components/BuildPanel.vue'
 import ChampionBar from './components/ChampionBar.vue'
 import CompilePanel from './components/CompilePanel.vue'
-import LiveGame from './components/LiveGame.vue'
-import ChampSelect from './components/ChampSelect.vue'
-import EndOfGame from './components/EndOfGame.vue'
+import AugmentAssist from './components/AugmentAssist.vue'
+import AugmentBuild from './components/AugmentBuild.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import Toasts from './components/Toasts.vue'
 import ThemeMenu from './components/ThemeMenu.vue'
 import type { ThemeOption } from './components/ThemeMenu.vue'
 import { toast } from './toast'
+import { buildState, loadBuild } from './build'
 import type { UpdateInfo } from './types'
 
 const params = new URLSearchParams(location.search)
 const status = ref<Status | null>(null)
-const logs = ref<LogEntry[]>([])
+const game = ref<Game | null>(null)
 const champions = ref<Champion[]>([])
 const selected = ref<Champion | null>(null)
 const followPick = ref(true)
 const soundOn = ref(sound.enabled())
 const showSettings = ref(false)
 const THEMES: ThemeOption[] = [
-  { id: 'hextech', label: 'Hextech', swatch: ['#010a13', '#c8aa6e', '#0ac8b9'] },
-  { id: 'linear', label: 'Linear dark', swatch: ['#0b0c10', '#141519', '#7c7cff'] },
-  { id: 'neon', label: 'Neon', swatch: ['#05060d', '#ff2bd6', '#00f0ff'] },
-  { id: 'synthwave', label: 'Synthwave', swatch: ['#170a2b', '#ff2d95', '#ffd166'] },
-  { id: 'terminal', label: 'Terminal', swatch: ['#000000', '#1f3a1f', '#39ff14'] },
-  { id: 'sketch', label: 'Sketch', swatch: ['#f6f1e7', '#2b2b2b', '#ffe066'] },
+  { id: 'hextech', label: '海克斯', swatch: ['#010a13', '#c8aa6e', '#0ac8b9'] },
+  { id: 'linear', label: '简洁深色', swatch: ['#0b0c10', '#141519', '#7c7cff'] },
+  { id: 'neon', label: '霓虹', swatch: ['#05060d', '#ff2bd6', '#00f0ff'] },
+  { id: 'synthwave', label: '合成波', swatch: ['#170a2b', '#ff2d95', '#ffd166'] },
+  { id: 'terminal', label: '终端', swatch: ['#000000', '#1f3a1f', '#39ff14'] },
+  { id: 'sketch', label: '手绘', swatch: ['#f6f1e7', '#2b2b2b', '#ffe066'] },
 ]
 const themeParam = params.get('theme')
 const theme = ref<string>(
@@ -59,7 +58,7 @@ async function checkUpdateSoon() {
     const u = upd.value
     if (u.hasUpdate && announcedUpdate !== u.latest && electronUpdate.value?.status !== 'downloading' && electronUpdate.value?.status !== 'downloaded') {
       announcedUpdate = u.latest
-      toast({ key: 'update', kind: 'info', sticky: true, title: `ezlol ${u.latest} available`, body: `You have ${u.current}.`, actions: [{ label: 'Download', primary: true, run: () => window.open(u.url, '_blank') }] })
+      toast({ key: 'update', kind: 'info', sticky: true, title: `ezlol 有新版本 ${u.latest}`, body: `当前版本 ${u.current}。`, actions: [{ label: '下载', primary: true, run: () => window.open(u.url, '_blank') }] })
     }
   } catch {
     /* offline */
@@ -67,18 +66,17 @@ async function checkUpdateSoon() {
 }
 watch(electronUpdate, (st) => {
   if (!st) return
-  if (st.status === 'downloaded') toast({ key: 'update', kind: 'success', sticky: true, title: `ezlol ${st.version} is ready`, body: 'Downloaded and verified. Installing swaps the app and relaunches it.', actions: [{ label: 'Install & restart', primary: true, run: installUpdate }] })
-  else if (st.status === 'downloading') toast({ key: 'update', kind: 'info', sticky: true, title: `Downloading ${st.version}…`, body: st.progress ? `${Math.round(st.progress * 100)}%` : undefined })
-  else if (st.status === 'error') toast({ key: 'update', kind: 'warn', title: 'Auto-update failed', body: `${st.error ?? ''} — use Download instead.`, actions: upd.value?.url ? [{ label: 'Download', run: () => window.open(upd.value!.url, '_blank') }] : undefined })
+  if (st.status === 'downloaded') toast({ key: 'update', kind: 'success', sticky: true, title: `ezlol ${st.version} 已下载`, body: '已下载并校验，安装后会自动重启。', actions: [{ label: '安装并重启', primary: true, run: installUpdate }] })
+  else if (st.status === 'downloading') toast({ key: 'update', kind: 'info', sticky: true, title: `正在下载 ${st.version}…`, body: st.progress ? `${Math.round(st.progress * 100)}%` : undefined })
+  else if (st.status === 'error') toast({ key: 'update', kind: 'warn', title: '自动更新失败', body: `${st.error ?? ''}——请手动下载。`, actions: upd.value?.url ? [{ label: '下载', run: () => window.open(upd.value!.url, '_blank') }] : undefined })
 })
 const electron = isElectron()
-// Page mode drives the layout: idle (lobby, queue, post-game) shows the side
-// column; select and game modes drop it and spread the panels out.
+// Page mode drives the layout: idle (lobby), select (champion select), game.
 const forcedMode = params.get('mode') // dev: ?mode=game|select|idle
 const mode = computed(() => {
   if (forcedMode === 'game' || forcedMode === 'select' || forcedMode === 'idle') return forcedMode
   const p = status.value?.phase
-  if (p === 'InProgress') return 'game'
+  if (p === 'InProgress' || game.value?.inGame) return 'game'
   if (p === 'ChampSelect') return 'select'
   return 'idle'
 })
@@ -88,45 +86,54 @@ watch(error, (e) => e && toast({ key: 'app-error', kind: 'error', title: 'ezlol'
 let unsub: (() => void) | null = null
 
 function onStatus(s: Status) {
-  const prev = status.value
   status.value = s
   if (followPick.value && s.pickedChampion) {
     const c = champions.value.find((x) => x.id === s.pickedChampion)
     if (c && selected.value?.id !== c.id) selected.value = c
   }
-  if (prev && prev.phase !== s.phase) {
-    if (s.phase === 'ReadyCheck') {
-      sound.queuePop()
-      sound.notify('ezlol', s.autoAccept ? 'Queue popped — accepting' : 'Queue popped!')
-      toast({ key: 'phase', kind: s.autoAccept ? 'success' : 'warn', title: 'Queue popped', body: s.autoAccept ? 'Accepting…' : 'Auto-accept is off — accept in the client.', ttl: 12000 })
-    } else if (s.phase === 'ChampSelect') {
-      sound.alert()
-      sound.notify('ezlol', 'Champ select')
-      toast({ key: 'phase', kind: 'info', title: 'Champ select', ttl: 5000 })
-    }
-  }
 }
 
-function onLog(l: LogEntry) {
-  logs.value = [...logs.value.slice(-199), l]
-  if (l.level === 'accept') {
-    sound.accepted()
-    toast({ key: 'phase', kind: 'success', title: 'Accepted', body: l.message, ttl: 6000 })
+// In-game poll: your champion (the build follows it) and the augment offer.
+// Fast while a game runs, slow otherwise; the endpoint is local and cheap.
+let gameTimer: number | undefined
+// The running game knows its mode even when the client connection does not:
+// make the build follow it (ARAM / Arena / Rift).
+watch(
+  () => (game.value?.inGame ? game.value.mode : ''),
+  (m) => {
+    const next = m === 'aram' || m === 'arena' || m === 'sr' ? m : ''
+    if (buildState.autoMode !== next) {
+      buildState.autoMode = next
+      if (!buildState.mode) void loadBuild()
+    }
+  },
+)
+async function pollGame() {
+  try {
+    game.value = await api.game()
+  } catch {
+    game.value = null
   }
+  const me = game.value?.me?.champion
+  if (followPick.value && me?.id && selected.value?.id !== me.id) {
+    const c = champions.value.find((x) => x.id === me.id)
+    if (c) selected.value = c
+  }
+  gameTimer = window.setTimeout(pollGame, game.value?.inGame ? 1500 : 4000)
 }
 
 onMounted(async () => {
   try {
     const [st, ch] = await Promise.all([api.status(), api.champions()])
     champions.value = ch.champions
-    logs.value = st.logs ?? []
     onStatus(st)
     const saved = localStorage.getItem('ezlol.champion')
     if (!selected.value && saved) selected.value = champions.value.find((c) => c.key === saved) ?? null
   } catch (e) {
     error.value = (e as Error).message
   }
-  unsub = subscribe(onStatus, onLog)
+  unsub = subscribe(onStatus)
+  void pollGame()
   if (!params.get('quiet')) {
     setTimeout(checkUpdateSoon, 4000)
     setInterval(checkUpdateSoon, 6 * 3600 * 1000)
@@ -134,7 +141,10 @@ onMounted(async () => {
   window.ezlol?.onUpdate?.((st) => (electronUpdate.value = st))
   sound.notify('', '') // triggers the permission prompt once
 })
-onUnmounted(() => unsub?.())
+onUnmounted(() => {
+  unsub?.()
+  clearTimeout(gameTimer)
+})
 
 // Widget dashboard: one grid per screen mode; widgets register on mount.
 const ARAM_QUEUES = new Set([450, 2400, 100])
@@ -142,6 +152,8 @@ const ARENA_QUEUES = new Set([1700, 1710, 1750])
 // In-game screens differ by mode, so each gets its own default layout and saved arrangement.
 const modeKey = computed<ModeKey>(() => {
   if (mode.value !== 'game') return mode.value
+  if (game.value?.mode === 'arena') return 'game-arena'
+  if (game.value?.mode === 'aram') return 'game-aram'
   const q = status.value?.queueId ?? 0
   const map = status.value?.mapId ?? 0
   if (ARENA_QUEUES.has(q) || map === 30) return 'game-arena'
@@ -168,18 +180,18 @@ function resetLayout() {
   const hadPreset = dash.hasPreset()
   dash.reset()
   layoutVersion.value++
-  toast({ key: 'layout', kind: 'info', title: hadPreset ? 'Layout restored' : 'Layout reset', body: hadPreset ? 'Back to your saved arrangement for this screen.' : 'Back to the built-in arrangement (no saved layout for this screen).', ttl: 4000 })
+  toast({ key: 'layout', kind: 'info', title: hadPreset ? '已恢复布局' : '已重置布局', body: hadPreset ? '回到你为这个界面保存的布局。' : '回到默认布局（这个界面没有保存过布局）。', ttl: 4000 })
 }
 const hasPreset = ref(false)
 function saveLayout() {
   dash.savePreset()
   hasPreset.value = true
-  toast({ key: 'layout', kind: 'success', title: 'Layout saved', body: 'Reset now returns to this arrangement on this screen.', ttl: 4000 })
+  toast({ key: 'layout', kind: 'success', title: '布局已保存', body: '之后点「重置」会回到这个布局。', ttl: 4000 })
 }
 function forgetLayout() {
   dash.clearPreset()
   hasPreset.value = false
-  toast({ key: 'layout', kind: 'info', title: 'Saved layout forgotten', body: 'Reset will use the built-in arrangement again.', ttl: 4000 })
+  toast({ key: 'layout', kind: 'info', title: '已删除保存的布局', body: '「重置」会回到默认布局。', ttl: 4000 })
 }
 watch([editing, modeKey], () => (hasPreset.value = dash.hasPreset()))
 watch(soundOn, (v) => sound.setEnabled(v))
@@ -188,11 +200,6 @@ function select(c: Champion) {
   selected.value = c
   localStorage.setItem('ezlol.champion', c.key)
 }
-
-async function toggleAuto() {
-  if (!status.value) return
-  status.value = await api.setAutoAccept(!status.value.autoAccept)
-}
 </script>
 
 <template>
@@ -200,26 +207,22 @@ async function toggleAuto() {
     <header class="topbar">
       <div class="brand">ez<span>lol</span></div>
       <span v-if="status" class="pill" :class="status.connected ? 'ok' : 'bad'">
-        <i class="dot" />{{ status.connected ? `${status.summoner || 'connected'}` : 'Client not running' }}
+        <i class="dot" />{{ status.connected ? `${status.summoner || '已连接'}` : '客户端未运行' }}
       </span>
-      <span v-if="status?.patch" class="pill"><i class="dot" />Patch {{ status.patch }}</span>
+      <span v-if="status?.patch" class="pill"><i class="dot" />版本 {{ status.patch }}</span>
       <span v-if="status?.queueName" class="pill warn"><i class="dot" />{{ status.queueName }}</span>
       <div class="grow" />
-      <label class="toggle" :class="{ on: editing }" title="Drag and resize the boxes; layout is saved per screen" @click="editing = !editing">
-        <span class="track" /><span>Edit layout</span>
+      <label class="toggle" :class="{ on: editing }" title="拖动、调整各个面板；每个界面的布局分开保存" @click="editing = !editing">
+        <span class="track" /><span>编辑布局</span>
       </label>
-      <button v-if="editing" class="primary" title="Remember this arrangement for this screen" @click="saveLayout">Save layout</button>
-      <button v-if="editing" :title="hasPreset ? 'Back to your saved arrangement' : 'Back to the built-in arrangement'" @click="resetLayout">Reset</button>
-      <button v-if="editing && hasPreset" class="danger" title="Forget the saved arrangement for this screen" @click="forgetLayout">Forget saved</button>
+      <button v-if="editing" class="primary" title="记住这个界面的当前布局" @click="saveLayout">保存布局</button>
+      <button v-if="editing" :title="hasPreset ? '回到你保存的布局' : '回到默认布局'" @click="resetLayout">重置</button>
+      <button v-if="editing && hasPreset" class="danger" title="删除这个界面保存的布局" @click="forgetLayout">删除保存</button>
       <label class="toggle" :class="{ on: soundOn }" @click="soundOn = !soundOn">
-        <span class="track" /><span>Sound</span>
-      </label>
-      <label v-if="status" class="toggle" :class="{ on: status.autoAccept }" @click="toggleAuto">
-        <span class="track" />
-        <span>Auto-accept {{ status.autoAccept ? 'ON' : 'OFF' }}</span>
+        <span class="track" /><span>提示音</span>
       </label>
       <ThemeMenu v-model="theme" :options="THEMES" />
-      <button class="gear" title="Settings" aria-label="Settings" @click="showSettings = true">
+      <button class="gear" title="设置" aria-label="设置" @click="showSettings = true">
         <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="3" />
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
@@ -230,19 +233,16 @@ async function toggleAuto() {
     <Toasts />
     <SettingsModal v-if="showSettings" @close="showSettings = false" />
 
-    <!-- Fixed bars, never part of the grid below: the champion card (with the picker
-         as a dropdown) and, only during champion select, the champ select strip -->
+    <!-- Fixed bar, never part of the grid below: the champion card (picker as a dropdown) -->
     <div class="bars">
       <ChampionBar :champion="selected" :champions="champions" :status="status" :screen="mode" :compact="mode === 'game'" v-model:follow="followPick" @select="select" />
-      <ChampSelect v-if="mode === 'select'" @preview="select" />
     </div>
 
     <div class="layout" :class="mode">
       <div ref="mainEl" :key="modeKey + ':' + layoutVersion" class="main grid-stack" :class="[mode, { editing }]">
-        <QueuePanel v-if="mode === 'idle'" :status="status" :logs="logs" @select="select" />
-        <EndOfGame v-if="mode === 'idle'" />
-        <!-- In game: live boxes first, build boxes flow in after them -->
-        <LiveGame v-if="mode === 'game'" @me="(c) => followPick && select(c)" />
+        <!-- In game (ARAM / Arena): the augment assistant first, build boxes after it -->
+        <AugmentAssist v-if="mode === 'game' && (modeKey === 'game-aram' || modeKey === 'game-arena')" :game="game" @picks="(p) => game && (game.picks = p)" />
+        <AugmentBuild v-if="modeKey !== 'game-arena' && modeKey !== 'game-rift'" :game="game" />
         <BuildPanel :status="status" :compact="mode === 'game'" />
         <CompilePanel v-if="mode === 'idle'" />
         <GhostWidget v-for="g in ghosts" :key="'ghost-' + g.id" :spec="g" />

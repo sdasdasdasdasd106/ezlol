@@ -37,27 +37,27 @@ onUnmounted(() => clearInterval(timer))
 
 <template>
   <Widget id="compile" :w="3">
-    <h2>Build data</h2>
+    <h2>出装数据统计（可选）</h2>
     <template v-if="st">
       <div class="kv">
-        <span>Riot API key</span><b>{{ st.hasKey ? 'configured' : 'not set' }}</b>
-        <span>Platform</span><b>{{ st.platform }}</b>
+        <span>Riot API key</span><b>{{ st.hasKey ? '已设置' : '未设置' }}</b>
+        <span>服务器</span><b>{{ st.platform }}</b>
         <template v-for="p in st.patches ?? []" :key="p.patch">
-          <span>Patch {{ p.patch }}</span><b>{{ p.matches }} matches · {{ p.champions }} champs</b>
+          <span>版本 {{ p.patch }}</span><b>{{ p.matches }} 场对局 · {{ p.champions }} 个英雄</b>
         </template>
       </div>
       <div v-if="st.progress.running" style="margin-top: 10px">
-        <div class="muted">{{ st.progress.queue === 450 ? 'ARAM' : 'Ranked' }} · {{ st.progress.phase }} · {{ st.progress.requests }} requests · {{ st.progress.errors }} errors</div>
+        <div class="muted">{{ st.progress.queue === 450 ? '大乱斗' : '排位' }} · {{ st.progress.phase }} · 请求 {{ st.progress.requests }} 次 · 出错 {{ st.progress.errors }} 次</div>
         <div class="progress"><div :style="{ width: `${(100 * st.progress.matchesDone) / Math.max(1, st.progress.target)}%` }" /></div>
         <div class="row">
-          <span class="muted">{{ st.progress.matchesDone }} / {{ st.progress.target }} matches</span>
-          <button class="danger" @click="stop">Stop</button>
+          <span class="muted">{{ st.progress.matchesDone }} / {{ st.progress.target }} 场</span>
+          <button class="danger" @click="stop">停止</button>
         </div>
       </div>
       <div v-else class="row" style="margin-top: 10px">
-        <button class="primary" :disabled="!st.hasKey" @click="start('ranked')">Compile ranked</button>
-        <button class="primary" :disabled="!st.hasKey" @click="start('aram')">Compile ARAM</button>
-        <span v-if="!st.hasKey" class="muted">Set <code>RIOT_API_KEY</code> and restart to enable.</span>
+        <button class="primary" :disabled="!st.hasKey" @click="start('ranked')">统计排位</button>
+        <button class="primary" :disabled="!st.hasKey" @click="start('aram')">统计大乱斗</button>
+        <span v-if="!st.hasKey" class="muted">出装默认用 op.gg 数据，不需要这个。想用东南亚服高分段对局自己统计，在设置里填 Riot API key。</span>
       </div>
       <div v-if="st.progress.lastError" class="note">{{ st.progress.lastError }}</div>
     </template>

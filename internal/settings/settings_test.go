@@ -8,14 +8,14 @@ import (
 func TestStoreRoundTrip(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "settings.json")
 	st := Load(p)
-	if !st.Get().AutoAccept || st.Get().Platform != "na1" {
+	if st.Get().Platform != "sg2" || !st.Get().OCR {
 		t.Fatal("defaults")
 	}
-	if err := st.Update(func(s *Settings) { s.RiotAPIKey = "RGAPI-1234-abcd"; s.AutoAccept = false }); err != nil {
+	if err := st.Update(func(s *Settings) { s.RiotAPIKey = "RGAPI-1234-abcd"; s.OCR = false }); err != nil {
 		t.Fatal(err)
 	}
 	again := Load(p)
-	if again.Get().RiotAPIKey != "RGAPI-1234-abcd" || again.Get().AutoAccept {
+	if again.Get().RiotAPIKey != "RGAPI-1234-abcd" || again.Get().OCR {
 		t.Fatalf("got %+v", again.Get())
 	}
 	m := again.Get().Masked()

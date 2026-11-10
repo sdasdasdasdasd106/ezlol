@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -50,11 +51,26 @@ func Discover() (Creds, error) {
 			return c, nil
 		}
 	}
-	if c, err := fromProcess(); err == nil {
-		return c, nil
+	// Reading process command lines spawns wmic / PowerShell on Windows: do it
+	// at most every 10 seconds, not on every one-second poll.
+	procMu.Lock()
+	due := time.Since(procLast) >= 10*time.Second
+	if due {
+		procLast = time.Now()
+	}
+	procMu.Unlock()
+	if due {
+		if c, err := fromProcess(); err == nil {
+			return c, nil
+		}
 	}
 	return Creds{}, ErrNotRunning
 }
+
+var (
+	procMu   sync.Mutex
+	procLast time.Time
+)
 
 // readLockfile parses "name:pid:port:password:protocol".
 func readLockfile(path string) (Creds, error) {

@@ -78,7 +78,7 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           ext=""; [[ "$GOOS" == "windows" ]] && ext=".exe"
-          go build -trimpath -ldflags "-s -w -X main.version=${{ steps.ver.outputs.version }}" -o "bin/ezlol$ext" ./cmd/ezlol
+          go build -trimpath -ldflags "-s -w -X main.version=${{ steps.ver.outputs.version }} -X main.repo=${{ github.repository }}" -o "bin/ezlol$ext" ./cmd/ezlol
       - name: OCR helper (macOS)
         if: matrix.goos == 'darwin'
         run: mkdir -p bin && swiftc -O -target ${{ matrix.goarch == 'arm64' && 'arm64' || 'x86_64' }}-apple-macos14.0 -o bin/ezlol-ocr tools/ocr/main.swift
@@ -86,6 +86,19 @@ jobs:
         shell: bash
         working-directory: electron
         run: npm version --no-git-tag-version "${{ steps.ver.outputs.version }}" || true
+      - name: Point updates at this repository
+        shell: bash
+        working-directory: electron
+        env:
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const p = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            p.build.publish = [{ provider: "github", owner: process.env.OWNER, repo: process.env.REPO }];
+            fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n");
+          '
       - name: Desktop app
         working-directory: electron
         env:

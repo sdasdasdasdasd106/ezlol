@@ -18,6 +18,10 @@ export interface BuildState {
   info: ChampionInfo | null
   applying: boolean
   expandAugs: boolean
+  /** Augments picked in the lists to preview "the build after taking these" (ARAM). */
+  augPreview: number[]
+  /** Mode of the running game (from the game itself), used when no mode is forced. */
+  autoMode: BuildMode
 }
 
 /**
@@ -37,6 +41,8 @@ export const buildState = reactive<BuildState>({
   info: null,
   applying: false,
   expandAugs: false,
+  augPreview: [],
+  autoMode: '',
 })
 
 // Requests can overlap (rapid champion switches); only the newest may write state.
@@ -44,6 +50,7 @@ let seq = 0
 
 export async function loadBuild(champion: Champion | null = buildState.champion): Promise<void> {
   const s = buildState
+  if (s.champion?.id !== champion?.id) s.augPreview = []
   s.champion = champion
   if (!champion) {
     seq++ // drop any in-flight response
@@ -60,7 +67,7 @@ export async function loadBuild(champion: Champion | null = buildState.champion)
   s.loadingChamp = champion
   s.error = ''
   try {
-    const b = await api.build(champion.key, s.role === 'NONE' ? undefined : s.role || undefined, s.mode || undefined)
+    const b = await api.build(champion.key, s.role === 'NONE' ? undefined : s.role || undefined, s.mode || s.autoMode || undefined)
     if (my !== seq) return
     s.build = b
     s.role = b.role
@@ -89,7 +96,7 @@ export async function loadBuild(champion: Champion | null = buildState.champion)
       s.info = null
     }
     s.error = (e as Error).message
-    toast({ key: 'build', kind: 'error', title: 'Build lookup failed', body: s.error })
+    toast({ key: 'build', kind: 'error', title: '获取出装失败', body: s.error })
   } finally {
     if (my === seq) s.loading = false
   }
@@ -113,9 +120,9 @@ export async function applyRunes(p: RunePage): Promise<void> {
   s.applying = true
   try {
     await api.applyRunes(s.build.champion.id, p)
-    toast({ key: 'runes', kind: 'success', title: 'Rune page set', body: `${s.build.champion.name}: ${p.primary.name} + ${p.secondary.name} is now selected in the client.` })
+    toast({ key: 'runes', kind: 'success', title: '符文已设置', body: `${s.build.champion.name}：${p.primary.name} + ${p.secondary.name}，已在客户端中选中。` })
   } catch (e) {
-    toast({ key: 'runes', kind: 'error', title: 'Rune page failed', body: (e as Error).message })
+    toast({ key: 'runes', kind: 'error', title: '设置符文失败', body: (e as Error).message })
   } finally {
     s.applying = false
   }
