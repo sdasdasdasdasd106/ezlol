@@ -19,6 +19,10 @@ import (
 
 const cdn = "https://ddragon.leagueoflegends.com"
 
+// locale is the Data Dragon language: champion, item, rune and spell names in
+// Simplified Chinese. Keys and ids stay the same in every language.
+const locale = "zh_CN"
+
 // Champion is a trimmed champion record.
 type Champion struct {
 	ID    int      `json:"id"`
@@ -160,7 +164,7 @@ func (s *Store) newestCached() (string, error) {
 
 func (s *Store) load(ctx context.Context, ver string) (*Data, error) {
 	d := &Data{Version: ver, Champions: map[int]Champion{}, Items: map[int]Item{}, Runes: map[int]Rune{}, Styles: map[int]Style{}, Spells: map[int]Spell{}}
-	base := fmt.Sprintf("%s/cdn/%s/data/en_US/", cdn, ver)
+	base := fmt.Sprintf("%s/cdn/%s/data/%s/", cdn, ver, locale)
 
 	var champ struct {
 		Data map[string]struct {
@@ -178,7 +182,7 @@ func (s *Store) load(ctx context.Context, ver string) (*Data, error) {
 			} `json:"image"`
 		} `json:"data"`
 	}
-	if err := s.cached(ctx, ver, "champion.json", base+"champion.json", &champ); err != nil {
+	if err := s.cached(ctx, ver, "champion."+locale+".json", base+"champion.json", &champ); err != nil {
 		return nil, err
 	}
 	for _, c := range champ.Data {
@@ -206,7 +210,7 @@ func (s *Store) load(ctx context.Context, ver string) (*Data, error) {
 			} `json:"image"`
 		} `json:"data"`
 	}
-	if err := s.cached(ctx, ver, "item.json", base+"item.json", &items); err != nil {
+	if err := s.cached(ctx, ver, "item."+locale+".json", base+"item.json", &items); err != nil {
 		return nil, err
 	}
 	for k, it := range items.Data {
@@ -230,7 +234,7 @@ func (s *Store) load(ctx context.Context, ver string) (*Data, error) {
 			} `json:"runes"`
 		} `json:"slots"`
 	}
-	if err := s.cached(ctx, ver, "runesReforged.json", base+"runesReforged.json", &runes); err != nil {
+	if err := s.cached(ctx, ver, "runesReforged."+locale+".json", base+"runesReforged.json", &runes); err != nil {
 		return nil, err
 	}
 	for _, st := range runes {
@@ -261,7 +265,7 @@ func (s *Store) load(ctx context.Context, ver string) (*Data, error) {
 			} `json:"image"`
 		} `json:"data"`
 	}
-	if err := s.cached(ctx, ver, "summoner.json", base+"summoner.json", &spells); err != nil {
+	if err := s.cached(ctx, ver, "summoner."+locale+".json", base+"summoner.json", &spells); err != nil {
 		return nil, err
 	}
 	for _, sp := range spells.Data {
@@ -277,15 +281,15 @@ func (s *Store) load(ctx context.Context, ver string) (*Data, error) {
 
 // Stat shards are not in runesReforged.json; icons come from the perk-images tree.
 var statShards = map[int]Rune{
-	5001: {ID: 5001, Name: "Health Scaling", Icon: cdn + "/cdn/img/perk-images/StatMods/StatModsHealthScalingIcon.png"},
-	5002: {ID: 5002, Name: "Armor", Icon: cdn + "/cdn/img/perk-images/StatMods/StatModsArmorIcon.png"},
-	5003: {ID: 5003, Name: "Magic Resist", Icon: cdn + "/cdn/img/perk-images/StatMods/StatModsMagicResIcon.MagicResist_Fix.png"},
-	5005: {ID: 5005, Name: "Attack Speed", Icon: cdn + "/cdn/img/perk-images/StatMods/StatModsAttackSpeedIcon.png"},
-	5007: {ID: 5007, Name: "Ability Haste", Icon: cdn + "/cdn/img/perk-images/StatMods/StatModsCDRScalingIcon.png"},
-	5008: {ID: 5008, Name: "Adaptive Force", Icon: cdn + "/cdn/img/perk-images/StatMods/StatModsAdaptiveForceIcon.png"},
-	5010: {ID: 5010, Name: "Move Speed", Icon: cdn + "/cdn/img/perk-images/StatMods/StatModsMovementSpeedIcon.png"},
-	5011: {ID: 5011, Name: "Health", Icon: cdn + "/cdn/img/perk-images/StatMods/StatModsHealthPlusIcon.png"},
-	5013: {ID: 5013, Name: "Tenacity and Slow Resist", Icon: cdn + "/cdn/img/perk-images/StatMods/StatModsTenacityIcon.png"},
+	5001: {ID: 5001, Name: "成长生命值", Icon: cdn + "/cdn/img/perk-images/StatMods/StatModsHealthScalingIcon.png"},
+	5002: {ID: 5002, Name: "护甲", Icon: cdn + "/cdn/img/perk-images/StatMods/StatModsArmorIcon.png"},
+	5003: {ID: 5003, Name: "魔法抗性", Icon: cdn + "/cdn/img/perk-images/StatMods/StatModsMagicResIcon.MagicResist_Fix.png"},
+	5005: {ID: 5005, Name: "攻击速度", Icon: cdn + "/cdn/img/perk-images/StatMods/StatModsAttackSpeedIcon.png"},
+	5007: {ID: 5007, Name: "技能急速", Icon: cdn + "/cdn/img/perk-images/StatMods/StatModsCDRScalingIcon.png"},
+	5008: {ID: 5008, Name: "适应之力", Icon: cdn + "/cdn/img/perk-images/StatMods/StatModsAdaptiveForceIcon.png"},
+	5010: {ID: 5010, Name: "移动速度", Icon: cdn + "/cdn/img/perk-images/StatMods/StatModsMovementSpeedIcon.png"},
+	5011: {ID: 5011, Name: "生命值", Icon: cdn + "/cdn/img/perk-images/StatMods/StatModsHealthPlusIcon.png"},
+	5013: {ID: 5013, Name: "韧性与减速抗性", Icon: cdn + "/cdn/img/perk-images/StatMods/StatModsTenacityIcon.png"},
 }
 
 func (s *Store) cached(ctx context.Context, ver, name, url string, out any) error {
@@ -442,8 +446,8 @@ func (s *Store) ChampionSpells(ctx context.Context, key string) (*ChampionDetail
 			} `json:"spells"`
 		} `json:"data"`
 	}
-	url := fmt.Sprintf("%s/cdn/%s/data/en_US/champion/%s.json", cdn, d.Version, key)
-	if err := s.cached(ctx, d.Version, "champion-"+key+".json", url, &raw); err != nil {
+	url := fmt.Sprintf("%s/cdn/%s/data/%s/champion/%s.json", cdn, d.Version, locale, key)
+	if err := s.cached(ctx, d.Version, "champion-"+key+"."+locale+".json", url, &raw); err != nil {
 		return nil, err
 	}
 	c, ok := raw.Data[key]

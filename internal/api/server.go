@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -41,7 +42,6 @@ type Server struct {
 	info      infoCache
 	ocr       *screen.Reader
 	offer     offerState
-	arena     arenaCache
 	ui        fs.FS  // built frontend, may be nil in dev
 	devProxy  string // vite dev server url, may be empty
 }
@@ -56,27 +56,17 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/status", s.status)
 	mux.HandleFunc("GET /api/events", s.events)
-	mux.HandleFunc("POST /api/auto-accept", s.autoAccept)
-	mux.HandleFunc("POST /api/accept", s.accept)
 	mux.HandleFunc("GET /api/champions", s.champions)
 	mux.HandleFunc("GET /api/champions/{key}/build", s.build)
-	mux.HandleFunc("GET /api/live", s.liveGame)
-	mux.HandleFunc("GET /api/champselect", s.champSelect)
+	mux.HandleFunc("GET /api/game", s.game)
 	mux.HandleFunc("GET /api/me/{id}", s.meChampion)
-	mux.HandleFunc("GET /api/session", s.session)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
 	mux.HandleFunc("GET /api/update", s.getUpdate)
 	mux.HandleFunc("POST /api/update/check", s.checkUpdate)
 	mux.HandleFunc("GET /api/mastery", s.mastery)
-	mux.HandleFunc("GET /api/arena/tiers", s.arenaTiers)
 	mux.HandleFunc("GET /api/champions/{key}/info", s.championInfo)
 	mux.HandleFunc("POST /api/runes/apply", s.applyRunes)
-	mux.HandleFunc("GET /api/champions/{key}/spells", s.championSpells)
-	mux.HandleFunc("GET /api/eog", s.endOfGame)
-	mux.HandleFunc("POST /api/champselect/swap/{id}", s.champSelectSwap)
-	mux.HandleFunc("POST /api/champselect/reroll", s.champSelectReroll)
-	mux.HandleFunc("POST /api/champselect/trade/{id}", s.tradeRequest)
 	mux.HandleFunc("GET /api/builds/status", s.buildsStatus)
 	mux.HandleFunc("POST /api/builds/compile", s.compile)
 	mux.HandleFunc("POST /api/builds/compile/stop", s.compileStop)
@@ -96,7 +86,7 @@ func (s *Server) Handler() http.Handler {
 			http.Error(w, "ui not built; run `make web` or set EZLOL_DEV=http://localhost:5173", 503)
 		})
 	}
-	return secureHeaders(logRequests(s.log, mux))
+	return localOnly(secureHeaders(logRequests(s.log, mux)))
 }
 
 func spaHandler(ui fs.FS) http.Handler {
@@ -111,6 +101,35 @@ func spaHandler(ui fs.FS) http.Handler {
 		}
 		fileServer.ServeHTTP(w, r)
 	})
+}
+
+// localOnly rejects requests that do not come from this machine's own pages:
+// a Host that is not loopback (DNS rebinding) or a cross-site Origin (another
+// website in the browser trying to drive ezlol).
+func localOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isLoopbackHost(r.Host) {
+			http.Error(w, "forbidden host", http.StatusForbidden)
+			return
+		}
+		if o := r.Header.Get("Origin"); o != "" && o != "null" {
+			u, err := url.Parse(o)
+			if err != nil || !isLoopbackHost(u.Host) {
+				http.Error(w, "forbidden origin", http.StatusForbidden)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isLoopbackHost(hostport string) bool {
+	h := hostport
+	if host, _, err := net.SplitHostPort(hostport); err == nil {
+		h = host
+	}
+	h = strings.Trim(h, "[]")
+	return h == "localhost" || h == "127.0.0.1" || h == "::1"
 }
 
 func secureHeaders(next http.Handler) http.Handler {
@@ -193,30 +212,10 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) autoAccept(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Enabled bool `json:"enabled"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body); err != nil {
-		writeErr(w, 400, "invalid body")
-		return
-	}
-	s.watcher.SetAutoAccept(body.Enabled)
-	writeJSON(w, 200, s.watcher.Status())
-}
-
-func (s *Server) accept(w http.ResponseWriter, r *http.Request) {
-	if err := s.watcher.Accept(r.Context()); err != nil {
-		writeErr(w, 502, err.Error())
-		return
-	}
-	writeJSON(w, 200, s.watcher.Status())
-}
-
 func (s *Server) champions(w http.ResponseWriter, r *http.Request) {
 	d := s.dd.Data()
 	if d == nil {
-		writeErr(w, 503, "data dragon not loaded")
+		writeErr(w, 503, "英雄数据还没加载好")
 		return
 	}
 	list := make([]ddragon.Champion, 0, len(d.Champions))
@@ -232,7 +231,7 @@ var validRoles = map[string]bool{"TOP": true, "JUNGLE": true, "MIDDLE": true, "B
 func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	d := s.dd.Data()
 	if d == nil {
-		writeErr(w, 503, "data dragon not loaded")
+		writeErr(w, 503, "英雄数据还没加载好")
 		return
 	}
 	key := r.PathValue("key")
@@ -244,7 +243,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		champ, ok = d.ChampionByKey(key)
 	}
 	if !ok {
-		writeErr(w, 404, "unknown champion")
+		writeErr(w, 404, "找不到这个英雄")
 		return
 	}
 	role := strings.ToUpper(r.URL.Query().Get("role"))
@@ -311,12 +310,12 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	} else {
 		b = &builds.Build{Champion: champ, Patch: patch, Role: role, Roles: roles, Source: "none", Mode: mode}
 		if mode == "aram" {
-			b.Notes = append(b.Notes, "ARAM mode: runes below are Riot's Howling Abyss recommendations.")
+			b.Notes = append(b.Notes, "大乱斗：下面的符文是客户端官方推荐。")
 		}
 		if s.compiler.HasKey() {
-			b.Notes = append(b.Notes, "No compiled match data for this champion/role yet. Run a compile from the Builds panel.")
+			b.Notes = append(b.Notes, "这个英雄/位置还没有统计数据，可以在「出装数据」面板里开始统计。")
 		} else {
-			b.Notes = append(b.Notes, "Item and skill data needs a Riot API key (set RIOT_API_KEY) to compile from ranked matches.")
+			b.Notes = append(b.Notes, "暂时拿不到出装数据（op.gg 无响应）。可在设置里填 Riot API key，从排位对局自己统计。")
 		}
 	}
 
@@ -362,7 +361,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	} else if b.Source == "none" {
-		b.Notes = append(b.Notes, "League client not running: in-client recommended runes unavailable.")
+		b.Notes = append(b.Notes, "英雄联盟客户端没开：拿不到客户端推荐符文。")
 	}
 	writeJSON(w, 200, b)
 }
@@ -432,58 +431,6 @@ func (s *Server) meChampion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"mastery": m, "record": rec, "mode": tag})
 }
 
-// championSpells returns ability cooldowns for a champion (Data Dragon).
-func (s *Server) championSpells(w http.ResponseWriter, r *http.Request) {
-	d := s.dd.Data()
-	if d == nil {
-		writeErr(w, 503, "data dragon not loaded")
-		return
-	}
-	key := r.PathValue("key")
-	if id, err := strconv.Atoi(key); err == nil {
-		if c, ok := d.Champions[id]; ok {
-			key = c.Key
-		}
-	} else if c, ok := d.ChampionByKey(key); ok {
-		key = c.Key
-	}
-	det, err := s.dd.ChampionSpells(r.Context(), key)
-	if err != nil {
-		writeErr(w, 502, err.Error())
-		return
-	}
-	writeJSON(w, 200, det)
-}
-
-// session returns today's games with champion display data.
-func (s *Server) session(w http.ResponseWriter, r *http.Request) {
-	c := s.watcher.Client()
-	if c == nil {
-		writeJSON(w, 200, map[string]any{"games": []any{}})
-		return
-	}
-	s.player.refresh(r.Context(), c)
-	d := s.dd.Data()
-	type row struct {
-		SessionGame
-		Champion ddragon.Champion `json:"champion"`
-	}
-	games := s.player.Today()
-	out := make([]row, 0, len(games))
-	wins := 0
-	for _, g := range games {
-		rr := row{SessionGame: g}
-		if d != nil {
-			rr.Champion = d.Champions[g.ChampionID]
-		}
-		if g.Win {
-			wins++
-		}
-		out = append(out, rr)
-	}
-	writeJSON(w, 200, map[string]any{"games": out, "wins": wins, "losses": len(games) - wins})
-}
-
 // mastery returns the local player's mastery for every champion.
 func (s *Server) mastery(w http.ResponseWriter, r *http.Request) {
 	c := s.watcher.Client()
@@ -493,18 +440,4 @@ func (s *Server) mastery(w http.ResponseWriter, r *http.Request) {
 	}
 	s.player.refresh(r.Context(), c)
 	writeJSON(w, 200, s.player.AllMastery())
-}
-
-// arenaTiers returns the Arena champion tier list (champion id -> standing).
-func (s *Server) arenaTiers(w http.ResponseWriter, r *http.Request) {
-	if s.community == nil {
-		writeJSON(w, 200, map[string]any{})
-		return
-	}
-	tiers, err := s.community.ArenaTiers(r.Context())
-	if err != nil {
-		writeErr(w, 502, err.Error())
-		return
-	}
-	writeJSON(w, 200, tiers)
 }

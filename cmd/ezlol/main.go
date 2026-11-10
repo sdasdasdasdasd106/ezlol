@@ -31,6 +31,10 @@ import (
 // version is set at build time with -ldflags "-X main.version=1.0.1".
 var version = "dev"
 
+// repo is the GitHub repository whose releases the update check follows; CI
+// sets it to the repository that built the binary (-X main.repo=owner/name).
+var repo = "aarlint/ezlol"
+
 func env(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -44,7 +48,7 @@ func main() {
 
 	addr := flag.String("addr", env("EZLOL_ADDR", "127.0.0.1:7331"), "listen address (loopback only by default)")
 	dataDir := flag.String("data", env("EZLOL_DATA_DIR", defaultData), "data directory")
-	platform := flag.String("platform", env("EZLOL_PLATFORM", "na1"), "Riot platform for build compilation (na1, euw1, kr, ...)")
+	platform := flag.String("platform", env("EZLOL_PLATFORM", "sg2"), "Riot platform for build compilation (sg2, ph2, th2, tw2, vn2, ...)")
 	matches := flag.Int("matches", envInt("EZLOL_MATCHES_PER_RUN", 200), "new matches per compile run")
 	dev := flag.String("dev", env("EZLOL_DEV", ""), "proxy UI to a Vite dev server, e.g. http://localhost:5173")
 	noOpen := flag.Bool("no-open", os.Getenv("EZLOL_NO_OPEN") != "", "do not open the browser on start")
@@ -112,7 +116,7 @@ func main() {
 		log.Info("no Riot API key; ranked compile disabled (set it in Settings). ARAM builds and runes need no key.")
 	}
 
-	upd := update.New("aarlint/ezlol", version)
+	upd := update.New(repo, version)
 	go upd.Run(ctx, 6*time.Hour, func() bool { return cfg.Get().UpdateCheck })
 
 	community := builds.NewCommunity(filepath.Join(*dataDir, "community"))

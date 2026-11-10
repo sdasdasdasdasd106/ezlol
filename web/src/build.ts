@@ -89,7 +89,7 @@ export async function loadBuild(champion: Champion | null = buildState.champion)
       s.info = null
     }
     s.error = (e as Error).message
-    toast({ key: 'build', kind: 'error', title: 'Build lookup failed', body: s.error })
+    toast({ key: 'build', kind: 'error', title: '获取出装失败', body: s.error })
   } finally {
     if (my === seq) s.loading = false
   }
@@ -113,9 +113,9 @@ export async function applyRunes(p: RunePage): Promise<void> {
   s.applying = true
   try {
     await api.applyRunes(s.build.champion.id, p)
-    toast({ key: 'runes', kind: 'success', title: 'Rune page set', body: `${s.build.champion.name}: ${p.primary.name} + ${p.secondary.name} is now selected in the client.` })
+    toast({ key: 'runes', kind: 'success', title: '符文已设置', body: `${s.build.champion.name}：${p.primary.name} + ${p.secondary.name}，已在客户端中选中。` })
   } catch (e) {
-    toast({ key: 'runes', kind: 'error', title: 'Rune page failed', body: (e as Error).message })
+    toast({ key: 'runes', kind: 'error', title: '设置符文失败', body: (e as Error).message })
   } finally {
     s.applying = false
   }

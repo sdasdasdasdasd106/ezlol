@@ -9,7 +9,6 @@ import (
 
 // Settings is everything the user can change from the UI.
 type Settings struct {
-	AutoAccept    bool   `json:"autoAccept"`
 	RiotAPIKey    string `json:"riotApiKey"` // never logged; masked in API responses
 	Platform      string `json:"platform"`
 	MatchesPerRun int    `json:"matchesPerRun"`
@@ -20,7 +19,7 @@ type Settings struct {
 
 // Defaults returns the initial configuration.
 func Defaults() Settings {
-	return Settings{AutoAccept: true, Platform: "na1", MatchesPerRun: 200, OCR: true, UpdateCheck: true}
+	return Settings{Platform: "sg2", MatchesPerRun: 200, OCR: true, UpdateCheck: true}
 }
 
 // Store is a mutex-guarded settings file.
@@ -75,7 +74,7 @@ func (s Settings) Masked() map[string]any {
 		}
 	}
 	return map[string]any{
-		"autoAccept": s.AutoAccept, "riotApiKeySet": s.RiotAPIKey != "", "riotApiKeyHint": key,
+		"riotApiKeySet": s.RiotAPIKey != "", "riotApiKeyHint": key,
 		"platform": s.Platform, "matchesPerRun": s.MatchesPerRun, "autoCompile": s.AutoCompile,
 		"ocr": s.OCR, "updateCheck": s.UpdateCheck,
 	}

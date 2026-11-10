@@ -10,7 +10,10 @@ const path = require('node:path')
 const crypto = require('node:crypto')
 const { execFile, spawn } = require('node:child_process')
 
-const REPO = 'aarlint/ezlol'
+// Releases come from the repository electron-builder publishes to (set in
+// package.json; CI points it at the repository that builds the app).
+const PUBLISH = (require('./package.json').build?.publish ?? [])[0] ?? {}
+const REPO = `${PUBLISH.owner ?? 'aarlint'}/${PUBLISH.repo ?? 'ezlol'}`
 const UA = `ezlol/${app.getVersion()} (${process.platform}; ${process.arch})`
 
 // Downloads may only come from GitHub itself (release assets redirect to

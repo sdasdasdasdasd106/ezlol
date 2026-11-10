@@ -1,5 +1,6 @@
-// Package screen detects the ARAM Mayhem augment selection screen by OCR-ing
-// the display (macOS, via the ezlol-ocr helper built from tools/ocr).
+// Package screen detects the augment selection screen by OCR-ing the display:
+// macOS via the ezlol-ocr helper built from tools/ocr, Windows via the built-in
+// Windows OCR driven by an embedded PowerShell script (ocr.ps1).
 package screen
 
 import (
@@ -28,47 +29,48 @@ type Line struct {
 // ErrUnavailable means no OCR helper exists on this platform/build.
 var ErrUnavailable = errors.New("screen ocr unavailable")
 
-// Reader runs the OCR helper.
+// Reader runs the OCR helper: a one-shot binary on macOS (tools/ocr), a
+// long-running PowerShell process using Windows OCR on Windows.
 type Reader struct {
-	path string
 	mu   sync.Mutex
-	last time.Time
-	fail int
+	scan func(ctx context.Context) ([]byte, error) // nil = unavailable
+	lang string                                    // OCR language the helper reported, if any
 }
 
-// New locates the helper: $EZLOL_OCR, then ezlol-ocr next to the executable.
+// New locates the helper for this platform.
 func New() *Reader {
-	if runtime.GOOS != "darwin" {
-		return &Reader{}
-	}
-	if p := os.Getenv("EZLOL_OCR"); p != "" {
-		return &Reader{path: p}
-	}
-	if exe, err := os.Executable(); err == nil {
-		p := filepath.Join(filepath.Dir(exe), "ezlol-ocr")
-		if _, err := os.Stat(p); err == nil {
-			return &Reader{path: p}
+	switch runtime.GOOS {
+	case "darwin":
+		if p := macHelper(); p != "" {
+			return &Reader{scan: func(ctx context.Context) ([]byte, error) { return runOnce(ctx, p) }}
 		}
-	}
-	if _, err := os.Stat("bin/ezlol-ocr"); err == nil {
-		return &Reader{path: "bin/ezlol-ocr"}
+	case "windows":
+		if scan := windowsHelper(); scan != nil {
+			return &Reader{scan: scan}
+		}
 	}
 	return &Reader{}
 }
 
-// Available reports whether OCR can run.
-func (r *Reader) Available() bool { return r.path != "" }
-
-// Read captures the screen and returns recognized lines.
-func (r *Reader) Read(ctx context.Context) ([]Line, error) {
-	if r.path == "" {
-		return nil, ErrUnavailable
+// macHelper finds ezlol-ocr: $EZLOL_OCR, then next to the executable, then bin/.
+func macHelper() string {
+	if p := os.Getenv("EZLOL_OCR"); p != "" {
+		return p
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	ctx, cancel := context.WithTimeout(ctx, 6*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, r.path).Output()
+	if exe, err := os.Executable(); err == nil {
+		p := filepath.Join(filepath.Dir(exe), "ezlol-ocr")
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	if _, err := os.Stat("bin/ezlol-ocr"); err == nil {
+		return "bin/ezlol-ocr"
+	}
+	return ""
+}
+
+func runOnce(ctx context.Context, path string) ([]byte, error) {
+	out, err := exec.CommandContext(ctx, path).Output()
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
@@ -76,11 +78,47 @@ func (r *Reader) Read(ctx context.Context) ([]Line, error) {
 		}
 		return nil, err
 	}
+	return out, nil
+}
+
+// Available reports whether OCR can run.
+func (r *Reader) Available() bool { return r.scan != nil }
+
+// Lang is the OCR language reported by the helper ("" until the first scan,
+// or when the helper does not say). On Windows, Chinese names are only
+// recognised when this starts with "zh".
+func (r *Reader) Lang() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lang
+}
+
+// Read captures the screen and returns recognized lines.
+func (r *Reader) Read(ctx context.Context) ([]Line, error) {
+	if r.scan == nil {
+		return nil, ErrUnavailable
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	out, err := r.scan(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var res struct {
 		Lines []Line `json:"lines"`
+		Lang  string `json:"lang"`
+		Error string `json:"error"`
 	}
 	if err := json.Unmarshal(out, &res); err != nil {
 		return nil, err
+	}
+	if res.Error != "" {
+		return nil, errors.New(res.Error)
+	}
+	if res.Lang != "" {
+		r.lang = res.Lang
 	}
 	return res.Lines, nil
 }
@@ -114,14 +152,14 @@ func Match(lines []Line, candidates map[string]string) []Hit {
 			continue
 		}
 		t := Normalize(l.Text)
-		if len(t) < 4 {
+		if len(t) < 4 { // bytes: 4 Latin letters, or 2 Chinese characters
 			continue
 		}
 		for norm, key := range candidates {
 			if seen[key] {
 				continue
 			}
-			if t == norm || (len(norm) >= 6 && strings.Contains(t, norm)) || (len(norm) >= 8 && len(t) >= 6 && lev(t, norm) <= 2) {
+			if matches(t, norm) {
 				seen[key] = true
 				hits = append(hits, Hit{key, l.X, l.Y})
 			}
@@ -133,6 +171,41 @@ func Match(lines []Line, candidates map[string]string) []Hit {
 		}
 	}
 	return hits
+}
+
+// matches reports whether OCR text t (normalised) names candidate norm.
+func matches(t, norm string) bool {
+	if t == norm {
+		return true
+	}
+	if hasHan(norm) {
+		// Chinese names are short (2-6 characters) and every character counts,
+		// so compare in characters and keep the tolerance tight.
+		rt, rn := len([]rune(t)), len([]rune(norm))
+		d := rt - rn
+		if d < 0 {
+			d = -d
+		}
+		switch {
+		case rn >= 3 && rt <= rn+4 && strings.Contains(t, norm):
+			return true
+		case rn >= 4 && d <= 1 && lev(t, norm) <= 1:
+			return true
+		case rn >= 7 && d <= 2 && lev(t, norm) <= 2:
+			return true
+		}
+		return false
+	}
+	return (len(norm) >= 6 && strings.Contains(t, norm)) || (len(norm) >= 8 && len(t) >= 6 && lev(t, norm) <= 2)
+}
+
+func hasHan(s string) bool {
+	for _, r := range s {
+		if unicode.Is(unicode.Han, r) {
+			return true
+		}
+	}
+	return false
 }
 
 // OfferLayout keeps only hits that look like the augment selection cards: in

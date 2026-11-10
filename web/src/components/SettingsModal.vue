@@ -15,7 +15,14 @@ const msgKind = ref<'ok' | 'err'>('ok')
 const busy = ref(false)
 const loadError = ref('')
 const soundOn = ref(sound.enabled())
-const autoRunes = ref(localStorage.getItem('ezlol.autoRunes') === 'on')
+const PLATFORMS = [
+  { id: 'sg2', label: 'sg2 · 新加坡 / 马来西亚 / 印尼' },
+  { id: 'ph2', label: 'ph2 · 菲律宾' },
+  { id: 'th2', label: 'th2 · 泰国' },
+  { id: 'tw2', label: 'tw2 · 台湾 / 港澳' },
+  { id: 'vn2', label: 'vn2 · 越南' },
+  { id: 'oc1', label: 'oc1 · 大洋洲' },
+]
 const dialog = ref<HTMLElement | null>(null)
 // Desktop-only settings live in the Electron shell; absent in a plain browser.
 const desktop = !!window.ezlol?.getAppSettings
@@ -25,7 +32,7 @@ async function saveApp(patch: Partial<Pick<AppSettings, 'launchAtLogin' | 'start
   busy.value = true
   try {
     appS.value = await window.ezlol.setAppSettings(patch)
-    flash('Saved', 'ok')
+    flash('已保存', 'ok')
   } catch (e) {
     flash(errText(e), 'err')
   } finally {
@@ -39,10 +46,10 @@ let pressOnBackdrop = false
 /** Badge, description and tint for the Version row, derived together so they never disagree. */
 const updateState = computed(() => {
   const u = upd.value
-  if (!u) return { badge: 'checking…', cls: '', desc: 'Checking release status…', descCls: '' }
-  if (u.hasUpdate) return { badge: `${u.latest} available`, cls: 'riot', desc: `You have ${u.current}; ${u.latest} is ready to download.`, descCls: 'ok' }
-  if (u.error) return { badge: 'check failed', cls: '', desc: `Check failed: ${u.error}`, descCls: 'warn' }
-  return { badge: 'up to date', cls: 'lcu', desc: `You have ${u.current}, the latest release.`, descCls: '' }
+  if (!u) return { badge: '检查中…', cls: '', desc: '正在检查新版本…', descCls: '' }
+  if (u.hasUpdate) return { badge: `有新版本 ${u.latest}`, cls: 'riot', desc: `当前 ${u.current}，可以下载 ${u.latest}。`, descCls: 'ok' }
+  if (u.error) return { badge: '检查失败', cls: '', desc: `检查失败：${u.error}`, descCls: 'warn' }
+  return { badge: '已是最新', cls: 'lcu', desc: `当前 ${u.current}，已是最新版本。`, descCls: '' }
 })
 
 function errText(e: unknown): string {
@@ -80,7 +87,7 @@ async function save(patch: Record<string, unknown>): Promise<boolean> {
   busy.value = true
   try {
     s.value = await api.saveSettings(patch)
-    flash('Saved', 'ok')
+    flash('已保存', 'ok')
     return true
   } catch (e) {
     flash(errText(e), 'err')
@@ -120,11 +127,6 @@ function toggleSound() {
   sound.setEnabled(soundOn.value)
 }
 
-function toggleAutoRunes() {
-  autoRunes.value = !autoRunes.value
-  localStorage.setItem('ezlol.autoRunes', autoRunes.value ? 'on' : 'off')
-}
-
 function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     e.preventDefault()
@@ -156,20 +158,109 @@ onBeforeUnmount(() => {
   <div class="backdrop" @pointerdown="onBackdropDown" @click="onBackdropClick">
     <section ref="dialog" class="panel modal" role="dialog" aria-modal="true" aria-labelledby="set-title" tabindex="-1">
       <h2>
-        <span id="set-title">Settings</span>
+        <span id="set-title">设置</span>
         <span class="ver">ezlol {{ s?.version ?? '…' }}</span>
         <span class="status" :class="msgKind" aria-live="polite" :title="msg || undefined">{{ msg }}</span>
-        <button type="button" class="x" aria-label="Close settings" @click="emit('close')">×</button>
+        <button type="button" class="x" aria-label="关闭设置" @click="emit('close')">×</button>
       </h2>
 
       <div class="body">
         <template v-if="s">
+          <!-- In-game -->
+          <h3>强化推荐</h3>
+          <dl class="rows">
+            <div class="setting">
+              <dt>
+                <span class="lbl"><label id="set-lbl-ocr" for="set-ocr">识别屏幕上的强化选项</label></span>
+                <span v-if="s.ocrAvailable" class="desc muted">选强化时自动读出屏幕上的三个选项，告诉你选哪个。游戏请用「无边框」或「窗口」模式，全屏模式可能截不到画面。</span>
+                <span v-else class="desc warn">这台电脑上用不了屏幕识别。</span>
+                <span v-if="s.ocrAvailable && s.ocrLang && !s.ocrLang.startsWith('zh')" class="desc warn">
+                  当前识别语言是 {{ s.ocrLang }}，认不出中文强化名。请在 Windows「设置 → 时间和语言 → 语言」里添加「中文(简体)」，并勾选「光学字符识别」，然后重启 ezlol。
+                </span>
+              </dt>
+              <dd>
+                <button id="set-ocr" type="button" role="switch" class="toggle" :class="{ on: s.ocr && s.ocrAvailable }" :aria-checked="s.ocr && s.ocrAvailable" aria-labelledby="set-lbl-ocr" :disabled="!s.ocrAvailable" :title="s.ocrAvailable ? undefined : '这台电脑上用不了屏幕识别'" @click="save({ ocr: !s.ocr })">
+                  <span class="track" aria-hidden="true" /><span class="state">{{ s.ocr && s.ocrAvailable ? '开' : '关' }}</span>
+                </button>
+              </dd>
+            </div>
+          </dl>
+
+          <!-- App -->
+          <h3>程序</h3>
+          <dl class="rows">
+            <div class="setting">
+              <dt>
+                <span class="lbl">版本 <span class="badge" :class="updateState.cls">{{ updateState.badge }}</span></span>
+                <span class="desc muted" :class="updateState.descCls">{{ updateState.desc }}</span>
+              </dt>
+              <dd>
+                <button type="button" :disabled="busy" @click="check">立即检查</button>
+                <button v-if="upd?.hasUpdate" type="button" class="primary" @click="download">下载</button>
+              </dd>
+            </div>
+
+            <div class="setting">
+              <dt>
+                <span class="lbl"><label id="set-lbl-updates" for="set-updates">自动检查更新</label></span>
+                <span class="desc muted">每次启动时检查有没有新版本。</span>
+              </dt>
+              <dd>
+                <button id="set-updates" type="button" role="switch" class="toggle" :class="{ on: s.updateCheck }" :aria-checked="s.updateCheck" aria-labelledby="set-lbl-updates" @click="save({ updateCheck: !s.updateCheck })">
+                  <span class="track" aria-hidden="true" /><span class="state">{{ s.updateCheck ? '开' : '关' }}</span>
+                </button>
+              </dd>
+            </div>
+
+            <div class="setting">
+              <dt>
+                <span class="lbl"><label id="set-lbl-sound" for="set-sound">提示音</label></span>
+                <span class="desc muted">识别到强化选择时响一声。</span>
+              </dt>
+              <dd>
+                <button id="set-sound" type="button" role="switch" class="toggle" :class="{ on: soundOn }" :aria-checked="soundOn" aria-labelledby="set-lbl-sound" @click="toggleSound">
+                  <span class="track" aria-hidden="true" /><span class="state">{{ soundOn ? '开' : '关' }}</span>
+                </button>
+              </dd>
+            </div>
+          </dl>
+
+          <!-- Desktop app (Electron only) -->
+          <template v-if="desktop && appS">
+            <h3>桌面</h3>
+            <dl class="rows">
+              <div class="setting">
+                <dt>
+                  <span class="lbl"><label id="set-lbl-login" for="set-login">开机启动</label></span>
+                  <span v-if="appS.loginItemSupported" class="desc muted">登录电脑时自动启动 ezlol。</span>
+                  <span v-else class="desc warn">只有安装版可用。</span>
+                </dt>
+                <dd>
+                  <button id="set-login" type="button" role="switch" class="toggle" :class="{ on: appS.launchAtLogin }" :aria-checked="appS.launchAtLogin" aria-labelledby="set-lbl-login" :disabled="!appS.loginItemSupported || busy" @click="saveApp({ launchAtLogin: !appS.launchAtLogin })">
+                    <span class="track" aria-hidden="true" /><span class="state">{{ appS.launchAtLogin ? '开' : '关' }}</span>
+                  </button>
+                </dd>
+              </div>
+
+              <div class="setting">
+                <dt>
+                  <span class="lbl"><label id="set-lbl-tray" for="set-tray">{{ appS.platform === 'darwin' ? '启动到菜单栏' : '启动到托盘' }}</label></span>
+                  <span class="desc muted">启动时隐藏到{{ appS.platform === 'darwin' ? '菜单栏' : '托盘' }}图标；关闭窗口后 ezlol 仍在后台运行。</span>
+                </dt>
+                <dd>
+                  <button id="set-tray" type="button" role="switch" class="toggle" :class="{ on: appS.startInTray }" :aria-checked="appS.startInTray" aria-labelledby="set-lbl-tray" :disabled="busy" @click="saveApp({ startInTray: !appS.startInTray })">
+                    <span class="track" aria-hidden="true" /><span class="state">{{ appS.startInTray ? '开' : '关' }}</span>
+                  </button>
+                </dd>
+              </div>
+            </dl>
+          </template>
           <!-- Riot API -->
-          <h3>Riot API</h3>
+          <h3>Riot API（可选）</h3>
           <p class="muted lead">
-            Only needed for Summoner's Rift builds, which are compiled from ranked matches; ARAM builds, augments and runes work without it.
-            Get a key at <a href="https://developer.riotgames.com" target="_blank" rel="noreferrer">developer.riotgames.com</a>.
-            Stored locally in <code>settings.json</code> (mode 0600), never logged or sent anywhere but Riot.
+            一般不需要：出装和强化数据默认来自 op.gg / aramgg，不用 key。只有想用东南亚服高分段排位对局自己统计峡谷出装时才需要。
+            在 <a href="https://developer.riotgames.com" target="_blank" rel="noreferrer">developer.riotgames.com</a> 申请 key。
+            key 只保存在本机的 <code>settings.json</code>，不会写进日志，也只发给 Riot。
           </p>
           <dl class="rows">
             <div class="setting wide">
@@ -177,33 +268,36 @@ onBeforeUnmount(() => {
                 <span class="lbl">
                   <label for="set-key">API key</label>
                   <span class="badge" :class="{ riot: s.riotApiKeySet }">
-                    <template v-if="s.riotApiKeySet">key set <span class="hint">{{ s.riotApiKeyHint }}</span></template>
-                    <template v-else>no key</template>
+                    <template v-if="s.riotApiKeySet">已设置 <span class="hint">{{ s.riotApiKeyHint }}</span></template>
+                    <template v-else>未设置</template>
                   </span>
                 </span>
-                <span class="desc muted">Dev keys expire daily; paste a new one here.</span>
+                <span class="desc muted">开发者 key 每 24 小时过期，过期后在这里粘贴新的。</span>
               </dt>
               <dd>
                 <input id="set-key" v-model="key" type="password" class="key" placeholder="RGAPI-…" autocomplete="off" spellcheck="false" @keydown.enter.prevent="saveKey" />
-                <button type="button" class="primary" :disabled="busy || !key" @click="saveKey">Save key</button>
-                <button type="button" class="danger" :disabled="busy || !s.riotApiKeySet" @click="clearKey">Clear</button>
+                <button type="button" class="primary" :disabled="busy || !key" @click="saveKey">保存</button>
+                <button type="button" class="danger" :disabled="busy || !s.riotApiKeySet" @click="clearKey">清除</button>
               </dd>
             </div>
 
             <div class="setting">
               <dt>
-                <span class="lbl"><label for="set-platform">Platform</label></span>
-                <span class="desc muted">Riot platform routing used for match history: na1, euw1, kr…</span>
+                <span class="lbl"><label for="set-platform">服务器</label></span>
+                <span class="desc muted">统计对局时从哪个服务器拉数据。</span>
               </dt>
               <dd>
-                <input id="set-platform" v-model.trim="s.platform" class="short" maxlength="5" spellcheck="false" autocapitalize="off" autocomplete="off" @change="save({ platform: s.platform })" />
+                <select id="set-platform" v-model="s.platform" @change="save({ platform: s.platform })">
+                  <option v-if="!PLATFORMS.some((p) => p.id === s?.platform)" :value="s.platform">{{ s.platform }}</option>
+                  <option v-for="p in PLATFORMS" :key="p.id" :value="p.id">{{ p.label }}</option>
+                </select>
               </dd>
             </div>
 
             <div class="setting">
               <dt>
-                <span class="lbl"><label for="set-matches">Matches per compile</label></span>
-                <span class="desc muted">Ranked matches sampled on each compile run (10 – 5000).</span>
+                <span class="lbl"><label for="set-matches">每次统计对局数</label></span>
+                <span class="desc muted">每次统计抓取多少场对局（10 – 5000）。</span>
               </dt>
               <dd>
                 <input id="set-matches" v-model.number="s.matchesPerRun" type="number" class="short" min="10" max="5000" step="10" @change="save({ matchesPerRun: s.matchesPerRun })" />
@@ -212,138 +306,23 @@ onBeforeUnmount(() => {
 
             <div class="setting">
               <dt>
-                <span class="lbl"><label id="set-lbl-compile" for="set-compile">Compile on start</label></span>
-                <span class="desc muted">Refresh Summoner's Rift builds when the app launches.</span>
+                <span class="lbl"><label id="set-lbl-compile" for="set-compile">启动时统计</label></span>
+                <span class="desc muted">每次打开程序时自动统计一次。</span>
               </dt>
               <dd>
                 <button id="set-compile" type="button" role="switch" class="toggle" :class="{ on: s.autoCompile }" :aria-checked="s.autoCompile" aria-labelledby="set-lbl-compile" @click="save({ autoCompile: !s.autoCompile })">
-                  <span class="track" aria-hidden="true" /><span class="state">{{ s.autoCompile ? 'On' : 'Off' }}</span>
+                  <span class="track" aria-hidden="true" /><span class="state">{{ s.autoCompile ? '开' : '关' }}</span>
                 </button>
               </dd>
             </div>
           </dl>
-
-          <!-- Queue -->
-          <h3>Queue</h3>
-          <dl class="rows">
-            <div class="setting">
-              <dt>
-                <span class="lbl"><label id="set-lbl-accept" for="set-accept">Auto-accept queue</label></span>
-                <span class="desc muted">Accept the ready check the moment it pops.</span>
-              </dt>
-              <dd>
-                <button id="set-accept" type="button" role="switch" class="toggle" :class="{ on: s.autoAccept }" :aria-checked="s.autoAccept" aria-labelledby="set-lbl-accept" @click="save({ autoAccept: !s.autoAccept })">
-                  <span class="track" aria-hidden="true" /><span class="state">{{ s.autoAccept ? 'On' : 'Off' }}</span>
-                </button>
-              </dd>
-            </div>
-
-            <div class="setting">
-              <dt>
-                <span class="lbl"><label id="set-lbl-runes" for="set-runes">Auto-apply runes</label></span>
-                <span class="desc muted">Push the recommended rune page to the client during champion select.</span>
-              </dt>
-              <dd>
-                <button id="set-runes" type="button" role="switch" class="toggle" :class="{ on: autoRunes }" :aria-checked="autoRunes" aria-labelledby="set-lbl-runes" @click="toggleAutoRunes">
-                  <span class="track" aria-hidden="true" /><span class="state">{{ autoRunes ? 'On' : 'Off' }}</span>
-                </button>
-              </dd>
-            </div>
-          </dl>
-
-          <!-- In-game -->
-          <h3>In-game</h3>
-          <dl class="rows">
-            <div class="setting">
-              <dt>
-                <span class="lbl"><label id="set-lbl-ocr" for="set-ocr">Augment pick detection</label></span>
-                <span v-if="s.ocrAvailable" class="desc muted">Read augment offers off the screen (OCR) and rank them live.</span>
-                <span v-else class="desc warn">The OCR helper is not available on this platform.</span>
-              </dt>
-              <dd>
-                <button id="set-ocr" type="button" role="switch" class="toggle" :class="{ on: s.ocr && s.ocrAvailable }" :aria-checked="s.ocr && s.ocrAvailable" aria-labelledby="set-lbl-ocr" :disabled="!s.ocrAvailable" :title="s.ocrAvailable ? undefined : 'OCR helper not available on this platform'" @click="save({ ocr: !s.ocr })">
-                  <span class="track" aria-hidden="true" /><span class="state">{{ s.ocr && s.ocrAvailable ? 'On' : 'Off' }}</span>
-                </button>
-              </dd>
-            </div>
-          </dl>
-
-          <!-- App -->
-          <h3>App</h3>
-          <dl class="rows">
-            <div class="setting">
-              <dt>
-                <span class="lbl">Version <span class="badge" :class="updateState.cls">{{ updateState.badge }}</span></span>
-                <span class="desc muted" :class="updateState.descCls">{{ updateState.desc }}</span>
-              </dt>
-              <dd>
-                <button type="button" :disabled="busy" @click="check">Check now</button>
-                <button v-if="upd?.hasUpdate" type="button" class="primary" @click="download">Download</button>
-              </dd>
-            </div>
-
-            <div class="setting">
-              <dt>
-                <span class="lbl"><label id="set-lbl-updates" for="set-updates">Check for updates</label></span>
-                <span class="desc muted">Look for a new release each time the app starts.</span>
-              </dt>
-              <dd>
-                <button id="set-updates" type="button" role="switch" class="toggle" :class="{ on: s.updateCheck }" :aria-checked="s.updateCheck" aria-labelledby="set-lbl-updates" @click="save({ updateCheck: !s.updateCheck })">
-                  <span class="track" aria-hidden="true" /><span class="state">{{ s.updateCheck ? 'On' : 'Off' }}</span>
-                </button>
-              </dd>
-            </div>
-
-            <div class="setting">
-              <dt>
-                <span class="lbl"><label id="set-lbl-sound" for="set-sound">Sounds</label></span>
-                <span class="desc muted">Play cues for queue pop and accept.</span>
-              </dt>
-              <dd>
-                <button id="set-sound" type="button" role="switch" class="toggle" :class="{ on: soundOn }" :aria-checked="soundOn" aria-labelledby="set-lbl-sound" @click="toggleSound">
-                  <span class="track" aria-hidden="true" /><span class="state">{{ soundOn ? 'On' : 'Off' }}</span>
-                </button>
-              </dd>
-            </div>
-          </dl>
-
-          <!-- Desktop app (Electron only) -->
-          <template v-if="desktop && appS">
-            <h3>Desktop</h3>
-            <dl class="rows">
-              <div class="setting">
-                <dt>
-                  <span class="lbl"><label id="set-lbl-login" for="set-login">Launch at login</label></span>
-                  <span v-if="appS.loginItemSupported" class="desc muted">Start ezlol when you sign in, so queue pops are accepted before you even open it.</span>
-                  <span v-else class="desc warn">Available in the installed app only.</span>
-                </dt>
-                <dd>
-                  <button id="set-login" type="button" role="switch" class="toggle" :class="{ on: appS.launchAtLogin }" :aria-checked="appS.launchAtLogin" aria-labelledby="set-lbl-login" :disabled="!appS.loginItemSupported || busy" @click="saveApp({ launchAtLogin: !appS.launchAtLogin })">
-                    <span class="track" aria-hidden="true" /><span class="state">{{ appS.launchAtLogin ? 'On' : 'Off' }}</span>
-                  </button>
-                </dd>
-              </div>
-
-              <div class="setting">
-                <dt>
-                  <span class="lbl"><label id="set-lbl-tray" for="set-tray">{{ appS.platform === 'darwin' ? 'Start in the menu bar' : 'Start in the tray' }}</label></span>
-                  <span class="desc muted">Start hidden behind a {{ appS.platform === 'darwin' ? 'menu bar' : 'tray' }} icon; closing the window keeps ezlol running there.</span>
-                </dt>
-                <dd>
-                  <button id="set-tray" type="button" role="switch" class="toggle" :class="{ on: appS.startInTray }" :aria-checked="appS.startInTray" aria-labelledby="set-lbl-tray" :disabled="busy" @click="saveApp({ startInTray: !appS.startInTray })">
-                    <span class="track" aria-hidden="true" /><span class="state">{{ appS.startInTray ? 'On' : 'Off' }}</span>
-                  </button>
-                </dd>
-              </div>
-            </dl>
-          </template>
         </template>
 
         <div v-else-if="loadError" class="empty">
-          <span class="desc warn">Could not load settings: {{ loadError }}</span>
-          <button type="button" @click="load">Retry</button>
+          <span class="desc warn">读取设置失败：{{ loadError }}</span>
+          <button type="button" @click="load">重试</button>
         </div>
-        <p v-else class="muted lead">Loading settings…</p>
+        <p v-else class="muted lead">正在读取设置…</p>
       </div>
     </section>
   </div>

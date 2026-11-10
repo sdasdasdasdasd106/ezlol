@@ -119,9 +119,7 @@ func (s *Server) detectOffer(ctx context.Context, live *liveResponse) (*augmentO
 	cands := map[string]string{}
 	for _, a := range augs {
 		byID[a.ID] = a
-		if n := screen.Normalize(a.Name); len(n) >= 4 {
-			cands[n] = strconv.Itoa(a.ID)
-		}
+		addCandidates(cands, a)
 	}
 	var diag []string
 	for _, l := range lines {
@@ -176,11 +174,11 @@ func (s *Server) detectOffer(ctx context.Context, live *liveResponse) (*augmentO
 		off.Best = b.Name
 		switch {
 		case b.Games >= 200:
-			off.Why = strconv.Itoa(int(b.WinRate*100+0.5)) + "% win rate on " + me.Champion.Name + " over " + strconv.Itoa(b.Games) + " games"
+			off.Why = me.Champion.Name + " 用它胜率 " + strconv.Itoa(int(b.WinRate*100+0.5)) + "%（" + strconv.Itoa(b.Games) + " 场）"
 		case b.Tier > 0:
-			off.Why = "tier " + strconv.Itoa(b.Tier) + " for " + me.Champion.Name
+			off.Why = me.Champion.Name + " 评级 " + tierLetter(b.Tier)
 		default:
-			off.Why = "best available"
+			off.Why = "数据不足，按评级排序"
 		}
 	}
 	if st.last == nil || !st.last.Active {
@@ -226,9 +224,7 @@ func (s *Server) detectArenaOffer(ctx context.Context, live *liveResponse) (*aug
 	cands := map[string]string{}
 	for _, a := range augs {
 		byID[a.ID] = a
-		if n := screen.Normalize(a.Name); len(n) >= 4 {
-			cands[n] = strconv.Itoa(a.ID)
-		}
+		addCandidates(cands, a)
 	}
 	keys := screen.OfferLayout(screen.Match(lines, cands))
 	if len(keys) < 2 {
@@ -275,11 +271,11 @@ func (s *Server) detectArenaOffer(ctx context.Context, live *liveResponse) (*aug
 		off.Best = b.Name
 		switch {
 		case b.Games >= 100 && b.AvgPlace > 0:
-			off.Why = fmt.Sprintf("avg place %.2f on %s over %d games", b.AvgPlace, me.Champion.Name, b.Games)
+			off.Why = fmt.Sprintf("%s 用它平均名次 %.2f（%d 场）", me.Champion.Name, b.AvgPlace, b.Games)
 		case b.Tier > 0:
-			off.Why = "tier " + strconv.Itoa(b.Tier) + " across all champions"
+			off.Why = "全英雄评级 " + tierLetter(b.Tier)
 		default:
-			off.Why = "best available"
+			off.Why = "数据不足，按评级排序"
 		}
 	}
 	if st.last == nil || !st.last.Active {
@@ -287,4 +283,21 @@ func (s *Server) detectArenaOffer(ctx context.Context, live *liveResponse) (*aug
 	}
 	st.last = off
 	return off, "available"
+}
+
+// tierLetter turns Tier 1..5 into S/A/B/C/D.
+func tierLetter(t int) string {
+	if t >= 1 && t <= 5 {
+		return string("SABCD"[t-1])
+	}
+	return "?"
+}
+
+// addCandidates registers an augment's Chinese and English names for on-screen matching.
+func addCandidates(cands map[string]string, a builds.Augment) {
+	for _, name := range []string{a.Name, a.NameEN} {
+		if n := screen.Normalize(name); len(n) >= 4 {
+			cands[n] = strconv.Itoa(a.ID)
+		}
+	}
 }

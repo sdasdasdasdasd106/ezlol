@@ -1,4 +1,4 @@
-import type { ArenaTier, Build, BuildsStatus, RunePage, ChampSelect, Champion, ChampionDetail, ChampionInfo, Eog, Live, LogEntry, Mastery, PlayRecord, Session, SettingsView, Status, UpdateInfo } from './types'
+import type { Build, BuildsStatus, RunePage, Champion, ChampionInfo, Game, Mastery, PlayRecord, SettingsView, Status, UpdateInfo } from './types'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...init })
@@ -8,10 +8,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  status: () => req<Status & { logs: LogEntry[]; ddVersion: string }>('/api/status'),
-  setAutoAccept: (enabled: boolean) =>
-    req<Status>('/api/auto-accept', { method: 'POST', body: JSON.stringify({ enabled }) }),
-  accept: () => req<Status>('/api/accept', { method: 'POST' }),
+  status: () => req<Status & { ddVersion: string }>('/api/status'),
   champions: () => req<{ version: string; champions: Champion[] }>('/api/champions'),
   build: (key: string, role?: string, mode?: string) => {
     const q = new URLSearchParams()
@@ -23,41 +20,33 @@ export const api = {
   buildsStatus: () => req<BuildsStatus>('/api/builds/status'),
   compile: (queue: 'ranked' | 'aram') => req<unknown>(`/api/builds/compile?queue=${queue}`, { method: 'POST' }),
   compileStop: () => req<unknown>('/api/builds/compile/stop', { method: 'POST' }),
-  live: () => req<Live>('/api/live'),
-  champSelect: () => req<ChampSelect>('/api/champselect'),
-  swapBench: (id: number) => req<unknown>(`/api/champselect/swap/${id}`, { method: 'POST' }),
-  reroll: () => req<unknown>('/api/champselect/reroll', { method: 'POST' }),
-  trade: (id: number, accept = false) => req<unknown>(`/api/champselect/trade/${id}${accept ? '?accept=1' : ''}`, { method: 'POST' }),
+  game: () => req<Game>('/api/game'),
   info: (key: string) => req<{ champion: Champion; info?: ChampionInfo }>(`/api/champions/${encodeURIComponent(key)}/info`),
-  eog: () => req<Eog>('/api/eog'),
-  session: () => req<Session>('/api/session'),
   settings: () => req<SettingsView>('/api/settings'),
   saveSettings: (patch: Record<string, unknown>) => req<SettingsView>('/api/settings', { method: 'PUT', body: JSON.stringify(patch) }),
   update: () => req<UpdateInfo>('/api/update'),
   checkUpdate: () => req<UpdateInfo>('/api/update/check', { method: 'POST' }),
   mastery: () => req<Record<string, Mastery>>('/api/mastery'),
-  arenaTiers: () => req<Record<string, ArenaTier>>('/api/arena/tiers'),
   applyRunes: (championId: number, page: RunePage) =>
     req<{ ok: boolean }>('/api/runes/apply', { method: 'POST', body: JSON.stringify({ championId, page }) }),
-  spells: (key: string) => req<ChampionDetail>(`/api/champions/${encodeURIComponent(key)}/spells`),
   me: (championId: number, mode?: string) =>
     req<{ mastery: Mastery | null; record: PlayRecord | null; mode: string }>(`/api/me/${championId}${mode ? `?mode=${mode}` : ''}`),
 }
 
-export function subscribe(onStatus: (s: Status) => void, onLog: (l: LogEntry) => void): () => void {
+/** Live client status over SSE (connection, phase, queue, picked champion). */
+export function subscribe(onStatus: (s: Status) => void): () => void {
   const es = new EventSource('/api/events')
   es.addEventListener('status', (e) => onStatus(JSON.parse((e as MessageEvent).data)))
-  es.addEventListener('log', (e) => onLog(JSON.parse((e as MessageEvent).data)))
   return () => es.close()
 }
 
 export const ROLES = ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY'] as const
 export const ROLE_LABEL: Record<string, string> = {
-  TOP: 'Top',
-  JUNGLE: 'Jungle',
-  MIDDLE: 'Mid',
-  BOTTOM: 'ADC',
-  UTILITY: 'Support',
+  TOP: '上单',
+  JUNGLE: '打野',
+  MIDDLE: '中单',
+  BOTTOM: '下路',
+  UTILITY: '辅助',
   UNKNOWN: '?',
 }
 
@@ -65,10 +54,6 @@ export function winrate(c: { games: number; wins: number }): string {
   return c.games ? `${Math.round((c.wins / c.games) * 100)}%` : '–'
 }
 
-export function fmtTime(sec: number): string {
-  const s = Math.max(0, Math.floor(sec))
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
-}
 
 /** Desktop-only settings owned by the Electron shell (not the Go backend). */
 export interface AppSettings {
@@ -99,9 +84,3 @@ export function fmtPoints(n: number): string {
   return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n)
 }
 
-/** Rough ability rank at a champion level assuming a standard 5/5/5/3 path. */
-export function estRank(level: number, key: string): number {
-  if (key === 'R') return level >= 16 ? 3 : level >= 11 ? 2 : level >= 6 ? 1 : 0
-  const r = level >= 16 ? 3 : level >= 11 ? 2 : level >= 6 ? 1 : 0
-  return Math.max(1, Math.min(5, Math.round((level - r) / 3)))
-}

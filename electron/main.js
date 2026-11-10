@@ -84,7 +84,7 @@ function showWindow() {
 }
 
 function trayLabel() {
-  return process.platform === 'darwin' ? 'Start in the menu bar' : 'Start in the tray'
+  return process.platform === 'darwin' ? '启动到菜单栏' : '启动到托盘'
 }
 function updateTray() {
   if (!appSettings.startInTray) {
@@ -102,13 +102,13 @@ function updateTray() {
   }
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: 'Open ezlol', click: showWindow },
+      { label: '打开 ezlol', click: showWindow },
       { type: 'separator' },
-      { label: 'Launch at login', type: 'checkbox', checked: appSettings.launchAtLogin, enabled: app.isPackaged, click: (item) => setAppSettings({ launchAtLogin: item.checked }) },
+      { label: '开机启动', type: 'checkbox', checked: appSettings.launchAtLogin, enabled: app.isPackaged, click: (item) => setAppSettings({ launchAtLogin: item.checked }) },
       { label: trayLabel(), type: 'checkbox', checked: appSettings.startInTray, click: (item) => setAppSettings({ startInTray: item.checked }) },
       { type: 'separator' },
       {
-        label: 'Quit ezlol',
+        label: '退出 ezlol',
         click: () => {
           app.isQuitting = true
           app.quit()
@@ -163,7 +163,7 @@ async function startBackend() {
     const ocr = app.isPackaged ? path.join(process.resourcesPath, 'ezlol-ocr') : path.join(__dirname, '..', 'bin', 'ezlol-ocr')
     if (fs.existsSync(ocr)) env.EZLOL_OCR = ocr
   }
-  backend = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'], env })
+  backend = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'], env, windowsHide: true })
   backend.stdout.on('data', (d) => process.stdout.write(d))
   backend.stderr.on('data', (d) => process.stderr.write(d))
   backend.on('exit', (code) => {

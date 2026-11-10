@@ -37,3 +37,36 @@ func TestMatch(t *testing.T) {
 		t.Fatalf("chat lines matched as offer: %v", got)
 	}
 }
+
+func TestMatchChinese(t *testing.T) {
+	cands := map[string]string{
+		Normalize("无尽递归"):   "1001",
+		Normalize("豪掷千金"):   "1002",
+		Normalize("死亡之环"):   "1003",
+		Normalize("尤里卡"):    "1004",
+		Normalize("逃跑计划"):   "2001",
+		Normalize("珠光护手之力"): "2002",
+	}
+	lines := []Line{
+		{Text: "选择一个强化符文", Conf: 1, X: 0.5, Y: 0.2},
+		{Text: "死 亡 之 坏", Conf: 1, X: 0.75, Y: 0.4}, // Windows OCR spaces + one wrong character
+		{Text: "无 尽 递 归", Conf: 1, X: 0.25, Y: 0.4},
+		{Text: "尤里卡", Conf: 1, X: 0.5, Y: 0.4},
+		// A long description that merely mentions a name must not count.
+		{Text: "你的技能在命中时会触发逃跑计划并获得大量移动速度", Conf: 1, X: 0.25, Y: 0.5},
+	}
+	got := OfferLayout(Match(lines, cands))
+	want := []string{"1001", "1004", "1003"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+	for i := range want {
+		if got[i].Key != want[i] {
+			t.Fatalf("got %v want %v", got, want)
+		}
+	}
+	// Three characters must not be fuzzily matched to something else.
+	if hits := Match([]Line{{Text: "尤里斯", Conf: 1, X: 0.5, Y: 0.4}}, cands); len(hits) != 0 {
+		t.Fatalf("fuzzy 3-character match: %v", hits)
+	}
+}

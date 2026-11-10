@@ -10,7 +10,7 @@ const tierLabel = (t: number) => ['', 'S', 'A', 'B', 'C', 'D'][t] ?? '?'
       <div v-for="t in toasts" :key="t.id" class="toast" :class="t.kind">
         <div class="head">
           <span class="title">{{ t.title }}</span>
-          <button class="x" title="Dismiss" @click="dismiss(t.id)">×</button>
+          <button class="x" title="关闭" @click="dismiss(t.id)">×</button>
         </div>
         <div v-if="t.body" class="body">{{ t.body }}</div>
         <div v-if="t.cards?.length" class="cards">
@@ -18,7 +18,7 @@ const tierLabel = (t: number) => ['', 'S', 'A', 'B', 'C', 'D'][t] ?? '?'
             <div class="ic"><img v-if="a.icon" :src="a.icon" :alt="a.name" /></div>
             <div class="cb">
               <div class="n"><span class="tp" :class="'t' + a.tier">{{ tierLabel(a.tier) }}</span>{{ a.name }}</div>
-              <div class="s">{{ a.avgPlace ? `avg place ${a.avgPlace.toFixed(2)} · ${a.games} games` : a.games ? `${pctf(a.winRate)} win · ${a.games} games · ${pctf(a.pickRate)} pick` : 'no data' }}</div>
+              <div class="s">{{ a.avgPlace ? `平均名次 ${a.avgPlace.toFixed(2)} · ${a.games} 场` : a.games ? `胜率 ${pctf(a.winRate)} · ${a.games} 场 · 选取 ${pctf(a.pickRate)}` : '暂无数据' }}</div>
               <div class="d">{{ a.desc }}</div>
             </div>
           </div>

@@ -1,256 +1,48 @@
-# ezlol
+# ezlol（东南亚服 · 简体中文改造版）
 
-Local companion app for League of Legends: auto-accept, live game intel, builds for every mode, and a desktop app that keeps itself up to date.
+基于 [aarlint/ezlol](https://github.com/aarlint/ezlol) 改造的英雄联盟本地小工具，**只保留两个功能**：
 
-1. **Queue watcher** – polls the League client and auto-accepts the ready check the moment your queue pops.
-   Sound cue and desktop notification on pop and on champ select. Today's win/loss tally and streak.
-2. **Champ select** – your team and the enemy team with damage profile (AD/AP), comp shape (tanks, ranged,
-   CC, toughness) and what your comp is missing. Bench ranked by your mastery, recent record and what the
-   team needs, with one-click swap, reroll and trade. **Apply** writes any rune page into the client and
-   selects it; **Auto runes** does that for whatever champion you end up with.
-3. **Live game** (in-game Live Client Data, no key) – scoreboard for both teams, item-derived AD/AP/armor/MR per
-   player, "what to build" threat tip, enemy summoner-spell cooldown tracker (click when they use it), death
-   timers, numbers-advantage banner, focus-target suggestion, enemy ability cooldowns (click a portrait),
-   item purchase feed, kill feed, your stats and gold.
-4. **Builds** – current-patch build for any champion and mode: Summoner's Rift by lane and ARAM, plus
-   ARAM Mayhem augment tiers. Starting items, core build order, boots, late items, runes, summoner spells,
-   skill order and full level path, win/pick rates. Follows your pick in champ select and your champion in
-   game. Shows your mastery, recent record and Riot's playstyle pips. Summoner's Rift games also get
-   objective timers and a lane-matchup box with the opponent's ability cooldowns.
-5. **Augment picks (macOS)** – when an ARAM Mayhem augment selection is due (game start, levels 7/11/15) ezlol
-   OCRs the screen, recognises the three offered augments and tells you which to take, ranked by your champion's
-   win rate. Needs Screen Recording permission (System Settings → Privacy & Security) for ezlol / your terminal.
-6. **Arena** – the live screen regroups the lobby into its teams (derived from kill assists, since the game
-   API reports everyone as one team): your trio/duo, every enemy team ranked by threat with AD/AP split and
-   items, plus Arena builds from op.gg (prismatic items, best partners, augment stats by average placement)
-   and the same on-screen augment pick assist ranked by placement.
-7. **Post-game** – full scoreboard with damage, gold and items as soon as the client has it.
-8. **Electron shell** – native macOS/Windows window with self-update.
+1. **出装推荐**：任意英雄、任意模式（召唤师峡谷分路 / 大乱斗 / 斗魂竞技场）的出门装、核心装顺序、鞋子、后期装、符文、召唤师技能、加点。数据来自 op.gg，不需要 API key。选英雄锁定后、或进游戏后，自动切到你在玩的英雄。
+2. **强化推荐**：海克斯乱斗（ARAM Mayhem）和斗魂竞技场里，出现强化选择时自动识别屏幕上的三个选项，告诉你选哪个（按该英雄用这个强化的胜率 / 平均名次排序）；平时也能看按胜率排好的强化列表。
 
-Go backend, Vue 3 frontend, single binary. Everything runs on `127.0.0.1`; nothing leaves your machine except
-read-only requests to Riot's CDN, community stat sites and, optionally, the Riot API.
+原版的自动接受对局、选英雄阵容分析、游戏内记分板、赛后数据等功能已删除。界面、英雄 / 装备 / 符文 / 强化名称都是简体中文。
 
-## Screenshots
+## 安装
 
-| Dashboard (Hextech theme) | Settings |
-|---|---|
-| ![Dashboard](docs/screenshots/dashboard-hextech.png) | ![Settings](docs/screenshots/settings.png) |
+在本仓库的 **Releases**（或 Actions 里最新一次构建的 Artifacts）下载 Windows 安装包 `ezlol-…-win-x64.exe`，或免安装版 `…-portable.exe`。
+安装包没有数字签名，Windows 会弹 SmartScreen 提示：点「更多信息 → 仍要运行」。
 
-| Linear dark | Neon | Synthwave |
-|---|---|---|
-| ![Linear](docs/screenshots/theme-linear.png) | ![Neon](docs/screenshots/theme-neon.png) | ![Synthwave](docs/screenshots/theme-synthwave.png) |
+先开还是先开英雄联盟都可以，它会自己连上客户端。
 
-| Terminal | Sketch |
-|---|---|
-| ![Terminal](docs/screenshots/theme-terminal.png) | ![Sketch](docs/screenshots/theme-sketch.png) |
+## 强化识别的要求（Windows）
 
-## Install
+- 用的是 Windows 自带的文字识别，**需要安装简体中文的「光学字符识别」**：
+  设置 → 时间和语言 → 语言和区域 → 添加「中文(简体，中国)」→ 语言选项里确认「光学字符识别」已安装。
+  中文系统一般已经自带。没装的话，程序会在设置和强化推荐面板里提示。
+- 游戏请用 **无边框** 或 **窗口** 模式。独占全屏模式下可能截不到画面。
+- 游戏客户端语言是简体中文；英文客户端也能认（同时匹配中英文名字）。
+- 可以在设置里关掉屏幕识别。
 
-Grab the latest build from [Releases](https://github.com/aarlint/ezlol/releases): `.dmg` for macOS
-(Apple Silicon `arm64` or Intel `x64`), `.exe` installer or portable for Windows. Builds are unsigned, so:
+## 东南亚服说明
 
-- macOS: after copying to Applications run `xattr -cr /Applications/ezlol.app` once, or right-click → Open.
-- Windows: click "More info → Run anyway" on the SmartScreen prompt.
+出装和强化数据都是 op.gg / aramgg 的全球数据，和服务器无关，不需要任何设置。
+设置里的「服务器」（默认 `sg2`）只在你填了 Riot API key、想用东南亚服高分段排位对局自己统计峡谷出装时才用到。
 
-Start it before or after the League client; it reconnects on its own.
+## 自己打包
 
-## Build from source
+推送到 GitHub 后，`.github/workflows/build.yml` 会自动构建 Windows / macOS 安装包（在 Actions 页面的 Artifacts 里下载）。
+推送一个 `v` 开头的标签（例如 `v2.0.0`）会自动发布 Release；程序的自动更新会跟随**你自己仓库**的 Release，不会被原版覆盖。
 
 ```bash
-make build      # builds the UI, embeds it, produces bin/ezlol
-./bin/ezlol     # listens on http://127.0.0.1:7331 and opens your browser
-make app        # run the Electron shell against bin/ezlol
+git tag v2.0.0
+git push origin v2.0.0
 ```
 
-Requires Go 1.26+ and Node 22+. CI (`.github/workflows/build.yml`) runs vet/tests, then builds macOS
-arm64/x64 and Windows x64 desktop apps; pushing a `v*` tag publishes them as a GitHub release.
-
-## How it works
-
-### Queue watcher
-
-The League client exposes a local HTTPS API (the LCU). ezlol reads the port and password from the client's
-`lockfile` (or the `LeagueClientUx` process arguments), polls `/lol-gameflow/v1/gameflow-phase` once a second,
-and when the phase is `ReadyCheck` with no response yet it POSTs `/lol-matchmaking/v1/ready-check/accept`.
-Auto-accept is on by default and can be toggled in the UI. Every phase change and accept is logged in the
-Events panel and streamed to the UI over Server-Sent Events.
-
-### Builds
-
-Two data sources, merged:
-
-| Source | Needs | Gives |
-|---|---|---|
-| **op.gg Arena stats** (`/champions/arena/{id}`) + **blitz.gg Arena augment stats** | nothing | Arena: items, prismatic items, best partners, champion-specific augment placements; global augment tiers per stage. |
-| **Riot in-client recommendations** (LCU `/lol-perks/v1/recommended-pages/...`) | League client running | Rune pages and summoner spells Riot recommends for the champion/role, Summoner's Rift (map 11) or Howling Abyss (map 12). Always available. |
-| **op.gg ARAM stats** (`lol-api-champion.op.gg`, ~8.5M games/patch) | nothing | ARAM: starting items, core build, boots, 4th–6th options, rune pages, spells, skill order + full level path, win/pick rate, tier/rank. Cached 3 h. |
-| **aramgg.com Mayhem augments** + CommunityDragon icons + blitz.gg descriptions | nothing | ARAM Mayhem augment win/pick rate and tier per champion (Tencent CN + client uploads), grouped by rarity. Cached 6 h. |
-| **Compiled from ranked matches** (Riot API match-v5) | `RIOT_API_KEY` | Summoner's Rift: starting items, core build order, boots, 4th–6th item options, rune pages with win rates, spells, skill max order, per-role game counts. |
-
-There is no free public build API, so ezlol compiles its own. With a key set, click **Compile ranked** or
-**Compile ARAM** in the Build data panel (or start with `-auto-compile`). It pulls Challenger and Grandmaster
-players' matches in that queue for your platform, folds every participant into per-champion/per-role aggregates, and saves them under
-the data directory as `builds/<patch>.json`. Each run adds new matches only; run it again over the patch to
-grow the sample. Item build order and skill order come from match timelines, so a run is two API calls per match.
-
-Development keys (from https://developer.riotgames.com) allow 100 requests per 2 minutes and expire every 24
-hours; ezlol respects both limits and backs off on 429. A 200-match run is roughly 400 requests.
-
-Static data (champion, item, rune and spell names and images) comes from Data Dragon and is cached under
-`ddragon/<version>/` in the data directory. It is refreshed daily.
-
-## Augment ratings
-
-Augment boxes carry an S / A / B / C / D pip. The letter comes from ezlol's own ranking, not the data
-source: ARAM Mayhem augments are ordered by win rate (samples under 200 games are unrated and show
-`?`), Arena augments by average placement, and the letter is the augment's rank within its rarity
-(top 12 % S, next 23 % A, next 30 % B, next 20 % C, rest D). The order and the letter therefore always agree.
-
-## Dashboard
-
-The champion card (portrait, Rift / ARAM / Arena and lane buttons, tier, your mastery and record, **Follow**)
-is a fixed bar under the header on every screen; it never moves. Click the portrait or name to open the
-champion picker as a dropdown: type to search, Enter picks the first match, sort by name or by your mastery.
-During champion select a second fixed strip appears under it with your team (trades), the enemy picks,
-the ARAM bench with Swap / Reroll, and the comp read-outs; it disappears when the game starts. Everything below it is a widget on a 12-column grid. Flip **Edit layout** in the header to drag boxes around and
-resize them from the corner; the arrangement is remembered per screen (lobby, champ select, and in game
-for Rift, ARAM and Arena separately). Each screen ships with a symmetrical 3 | 6 | 3 column default: live
-scoreboards and team boxes in the middle, status and augments on the left, you / shopping / kill feed on the right.
-**Save layout** snapshots the current arrangement for that screen; **Reset** returns to that snapshot (or to
-the built-in arrangement if you never saved one); **Forget saved** drops the snapshot. Boxes scroll internally when their content is taller than the widget. In edit mode every box the
-screen *can* show, including ones that only appear later (bench in ARAM, enemy picks, Arena teams, augments…),
-is offered as a dashed ghost slot: place it once and the real box drops into that spot when it shows up, so
-nothing shifts mid-game. Boxes keep their exact positions; gaps are allowed.
-
-## Installing on macOS
-
-Releases from 1.0.11 on are signed with a Developer ID and notarized, so they open like any other app and
-update in place. Older, unsigned copies need right-click → **Open** once; if macOS says such a copy is
-*damaged*, clear the quarantine flag and re-seal it, then open it normally:
+本地构建需要 Go 1.26+ 和 Node 22+：
 
 ```bash
-xattr -cr /Applications/ezlol.app
-codesign --force --deep --sign - /Applications/ezlol.app
+make build      # 构建界面并生成 bin/ezlol
+./bin/ezlol     # 在 http://127.0.0.1:7331 打开
 ```
 
-See `docs/SIGNING.md` for how the signing and notarization pipeline is set up.
-
-## Desktop app
-
-The installed app adds a **Desktop** section to Settings: **Launch at login** registers ezlol as a login
-item, and **Start in the tray** (menu bar on macOS) starts it hidden behind a tray icon whose menu
-opens the window, flips both options and quits. Closing the window in tray mode keeps the watcher
-running, so queue pops are still accepted. Launching ezlol a second time just brings the window back.
-
-## Themes
-
-Themes, switchable from the header dropdown (persisted): **Hextech** (classic League: gold frames, Cinzel
-headings, glow), **Linear dark** (flat neutral surfaces, indigo accent, rounded, system font), **Neon**
-(cyberpunk cyan/magenta glow, Orbitron), **Synthwave** (purple night, pink and yellow, grid horizon),
-**Terminal** (green phosphor on black, JetBrains Mono, scanlines) and **Sketch** (paper and ink, hand-drawn
-wobbly borders, handwriting fonts). Every colour, radius, font, button, switch and heading style is a CSS token on `:root`; a theme is just a
-`:root[data-theme="…"]` block that overrides them (see `web/src/style.css`).
-
-## Settings and updates
-
-The ⚙ **Settings** dialog (any mode) holds everything user-facing: Riot API key (masked; stored in
-`settings.json` in the data directory with mode 0600, never logged), platform, matches per compile, compile on
-start, auto-accept, augment pick detection, update checks, sounds, auto runes.
-
-Updates: the app checks GitHub releases on start and every six hours. **Windows** self-updates through
-electron-updater (background download, "Install & restart"). **macOS** self-updates through ezlol's own
-updater because the builds are unsigned: it downloads the zip for your CPU, verifies it against
-`SHA256SUMS.txt`, strips the quarantine flag, swaps `ezlol.app` in place (the folder must be writable by
-you, e.g. `/Applications` or `~/Applications`) and relaunches. To get rid of the Gatekeeper prompt and use
-in-place updates on macOS too, sign and notarize the builds: see [docs/SIGNING.md](docs/SIGNING.md) (five
-repository secrets; CI does the rest).
-
-## Configuration
-
-Flags or environment variables (override the saved settings for that run):
-
-| Flag | Env | Default | |
-|---|---|---|---|
-| `-addr` | `EZLOL_ADDR` | `127.0.0.1:7331` | Listen address. Keep it on loopback. |
-| `-data` | `EZLOL_DATA_DIR` | `~/Library/Application Support/ezlol` | Cache and compiled builds. |
-| `-platform` | `EZLOL_PLATFORM` | `na1` | Riot platform used for compiling (`euw1`, `kr`, ...). |
-| `-matches` | `EZLOL_MATCHES_PER_RUN` | `200` | New matches per compile run. |
-| | `RIOT_API_KEY` | | Ranked compile key; saved into settings.json for later runs. Never logged. |
-| `-auto-compile` | `EZLOL_AUTO_COMPILE` | off | Start a compile run on boot. |
-| `-no-open` | `EZLOL_NO_OPEN` | off | Do not open the browser. |
-| `-dev` | `EZLOL_DEV` | | Proxy the UI to a Vite dev server, e.g. `http://localhost:5173`. |
-| | `EZLOL_LOCKFILE` | | Override the League lockfile path (non-default install). |
-
-Store the key in credvault (`credvault set RIOT_API_KEY`, reads stdin) and launch with the credvault
-secret token for `RIOT_API_KEY` in the environment assignment so the value never touches shell history:
-
-```bash
-RIOT_API_KEY={{SECRET:RIOT_API_KEY}} ./bin/ezlol
-```
-
-## Development
-
-```bash
-make dev                    # backend, proxying the UI to Vite
-cd web && npm run dev       # Vite with HMR on :5173, /api proxied to :7331
-make test
-```
-
-Layout:
-
-```
-cmd/ezlol           entrypoint, flags, wiring
-internal/lcu        League client discovery + REST client
-internal/watcher    poll loop, auto-accept, event hub
-internal/ddragon    Data Dragon loader and disk cache
-internal/builds     match ingest, aggregate store, Riot compiler, display resolver
-internal/api        HTTP API, SSE, embedded UI
-web/                Vue 3 + Vite frontend (embedded into the binary at build time)
-```
-
-API:
-
-```
-GET  /api/status                      watcher snapshot + recent events
-GET  /api/events                      SSE: status, log
-POST /api/auto-accept  {"enabled":b}  toggle
-POST /api/accept                      accept the current ready check
-GET  /api/champions                   champion list (Data Dragon)
-GET  /api/champions/{key}/build?role= merged build for a champion
-GET  /api/champions/{key}/info        Riot tactical + playstyle info (from the client)
-GET  /api/champselect                 champ select: teams, bench (ranked), comp analysis
-POST /api/champselect/swap/{id}       swap with a bench champion
-POST /api/champselect/reroll          spend a reroll
-GET  /api/live                        in-game scoreboard from the Live Client Data API
-GET  /api/eog                         post-game stats block
-GET  /api/me/{id}?mode=aram|sr        your mastery + recent record on a champion
-GET  /api/session                     today's games, wins, losses
-GET  /api/champions/{key}/spells      ability cooldowns per rank (Data Dragon)
-POST /api/runes/apply                 write a rune page into the client and select it
-POST /api/champselect/trade/{id}      request (or ?accept=1 accept) a champion trade
-GET  /api/builds/status               key present, compile progress, compiled patches
-POST /api/builds/compile?queue=ranked|aram   start a compile run
-POST /api/builds/compile/stop         cancel it
-```
-
-## Electron
-
-```bash
-make app     # run the desktop shell against bin/ezlol
-make dmg     # package ezlol.app + .dmg into electron/dist
-```
-
-The shell spawns `bin/ezlol` (or reuses one already listening on 7331), sandboxes the renderer, and opens
-external links in the system browser. Closing the window keeps the watcher alive in the Dock; Cmd+Q quits both.
-Electron keeps its own profile in `~/Library/Application Support/ezlol-app`, separate from the backend's data
-directory.
-
-## Security notes
-
-- The LCU and the in-game Live Client Data API both present self-signed certificates on loopback; verification
-  is disabled for those two loopback clients only.
-- The server binds to loopback and sets CSP, `X-Frame-Options: DENY` and `nosniff`. Images are allowed from
-  `ddragon.leagueoflegends.com` only.
-- The Riot key is read from the environment, sent only in the `X-Riot-Token` header to `*.api.riotgames.com`,
-  and never persisted or logged.
-- `typescript` is pinned to 5.x because `vue-tsc` 3.3 does not support TypeScript 7.
+原版英文说明见 [README.original.md](README.original.md)。
