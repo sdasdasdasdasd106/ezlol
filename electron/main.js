@@ -32,7 +32,7 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 // ---- Desktop settings: login item, tray, overlay, hotkeys ----
-const HOTKEY_DEFAULTS = { pick1: 'CommandOrControl+Shift+1', pick2: 'CommandOrControl+Shift+2', pick3: 'CommandOrControl+Shift+3', toggle: 'CommandOrControl+Shift+H' }
+const HOTKEY_DEFAULTS = { pick1: 'CommandOrControl+Shift+1', pick2: 'CommandOrControl+Shift+2', pick3: 'CommandOrControl+Shift+3', toggle: 'CommandOrControl+Shift+H', aiLook: 'CommandOrControl+Shift+A' }
 const OVERLAY_POSITIONS = ['bottom-left', 'top-left', 'left-middle', 'top-right', 'bottom-right']
 const APP_SETTINGS_DEFAULTS = { launchAtLogin: false, startInTray: false, overlay: true, overlayPos: 'bottom-left', hotkeys: HOTKEY_DEFAULTS }
 const appSettingsPath = () => path.join(app.getPath('userData'), 'app-settings.json')
@@ -290,6 +290,12 @@ async function pickSlot(n) {
   if (overlayMode === 'hidden') overlayMode = 'auto'
 }
 
+async function aiLook() {
+  flashOverlay('AI 正在根据识别出的文字分析强化…')
+  const r = await postJSON('/api/game/ai-look', {})
+  if (r.status !== 200) flashOverlay(r.body.error || 'AI 分析失败')
+}
+
 function toggleOverlay() {
   if (!overlayWin) createOverlay()
   overlayMode = overlayWin.isVisible() ? 'hidden' : 'pinned'
@@ -312,6 +318,7 @@ function registerHotkeys() {
   reg(hk.pick2, () => pickSlot(2))
   reg(hk.pick3, () => pickSlot(3))
   reg(hk.toggle, toggleOverlay)
+  reg(hk.aiLook, aiLook)
   if (overlayWin) overlayWin.webContents.send('overlay:hotkeys', hk)
 }
 ipcMain.handle('app-settings:set', (_e, patch) => setAppSettings(patch))

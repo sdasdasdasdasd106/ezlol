@@ -9,6 +9,7 @@ import BuildPanel from './components/BuildPanel.vue'
 import ChampionBar from './components/ChampionBar.vue'
 import AugmentAssist from './components/AugmentAssist.vue'
 import AugmentBuild from './components/AugmentBuild.vue'
+import StrategyCard from './components/StrategyCard.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import Toasts from './components/Toasts.vue'
 import ThemeMenu from './components/ThemeMenu.vue'
@@ -218,6 +219,7 @@ function select(c: Champion) {
         <AugmentAssist v-if="mode === 'game'" :game="game" @picks="(p) => game && (game.picks = p)" />
         <AugmentBuild :game="game" />
         <BuildPanel :compact="mode === 'game'" />
+        <StrategyCard :game="game" :champion="selected" />
         <GhostWidget v-for="g in ghosts" :key="'ghost-' + g.id" :spec="g" />
       </div>
     </div>

@@ -48,20 +48,23 @@ type augPick struct {
 
 // augmentOffer is the current augment selection screen, when detected.
 type augmentOffer struct {
-	Active    bool        `json:"active"`
-	Pending   bool        `json:"pending"`           // a pick is due (level threshold crossed) but not yet seen on screen
-	Waiting   bool        `json:"waiting,omitempty"` // loading screen: the game has not started yet
-	Level     int         `json:"level"`
-	Stage     int         `json:"stage"`            // 1..4 = game start, level 7, 11, 15
-	Offered   []offerCard `json:"offered"`          // best first
-	Screen    []int       `json:"screen,omitempty"` // augment ids left to right, as on screen (hotkeys 1/2/3)
-	Chosen    int         `json:"chosen,omitempty"` // slot (1..3) the player marked with a hotkey, 0 = none yet
-	Best      string      `json:"best,omitempty"`
-	Why       string      `json:"why,omitempty"`
-	Note      string      `json:"note,omitempty"`   // how clear the choice is
-	Source    string      `json:"source,omitempty"` // aramkit | aramgg | op.gg
-	ScannedAt time.Time   `json:"scannedAt"`
-	Lines     []string    `json:"lines,omitempty"` // diagnostics: what OCR last read
+	Active    bool          `json:"active"`
+	Pending   bool          `json:"pending"`           // a pick is due (level threshold crossed) but not yet seen on screen
+	Waiting   bool          `json:"waiting,omitempty"` // loading screen: the game has not started yet
+	Level     int           `json:"level"`
+	Stage     int           `json:"stage"`            // 1..4 = game start, level 7, 11, 15
+	Offered   []offerCard   `json:"offered"`          // best first
+	Screen    []int         `json:"screen,omitempty"` // augment ids left to right, as on screen (hotkeys 1/2/3)
+	Chosen    int           `json:"chosen,omitempty"` // slot (1..3) the player marked with a hotkey, 0 = none yet
+	Best      string        `json:"best,omitempty"`
+	Why       string        `json:"why,omitempty"`
+	Note      string        `json:"note,omitempty"`   // how clear the choice is
+	Source    string        `json:"source,omitempty"` // aramkit | aramgg | op.gg
+	Via       string        `json:"via,omitempty"`    // ocr | ai (worked out by the AI from the OCR text)
+	AI        *aiReviewView `json:"ai,omitempty"`     // the AI's second opinion
+	sig       string
+	ScannedAt time.Time `json:"scannedAt"`
+	Lines     []string  `json:"lines,omitempty"` // diagnostics: what OCR last read
 }
 
 // Mayhem grants augment picks at game start and at these champion levels.
@@ -87,11 +90,20 @@ type offerState struct {
 	lastLines  []string
 	picks      []augPick
 	champ      int
-	chosen     int    // slot marked with a hotkey while the current offer is up
-	cand       string // augment ids of the last scan's possible offer
-	candN      int    // how many scans in a row read that same offer
-	emptyN     int    // scans in a row that read almost no text
-	lastStatus string // OCR status of the last scan, shown while waiting
+	chosen     int            // slot marked with a hotkey while the current offer is up
+	cand       string         // augment ids of the last scan's possible offer
+	candN      int            // how many scans in a row read that same offer
+	emptyN     int            // scans in a row that read almost no text
+	lastStatus string         // OCR status of the last scan, shown while waiting
+	lastOCR    []screen.Line  // raw lines of the last scan (for the AI text reader)
+	lastNames  map[string]int // display name -> augment id
+	// AI (DeepSeek): reviews per offer, and the screenshot reader.
+	reviews    map[string]*aiReviewView
+	aiRunning  bool
+	aiAt       time.Time // last started
+	aiDone     time.Time // last answered
+	aiChoosing bool
+	aiIDs      []int
 }
 
 func styleLabel(k string) string { return builds.StyleName(k) }
@@ -186,6 +198,7 @@ func (s *Server) detectOffer(ctx context.Context, live *liveResponse) (*augmentO
 	}
 	if time.Since(st.lastScan) < interval {
 		if active {
+			s.attachReview(st.last)
 			return st.last, "available"
 		}
 		return &augmentOffer{Pending: true, Level: st.pending, Stage: stage, Lines: st.lastLines}, st.lastStatus
@@ -223,17 +236,27 @@ func (s *Server) detectOffer(ctx context.Context, live *liveResponse) (*augmentO
 		}
 	}
 	cands := map[string]string{}
+	names := map[string]int{}
+	addName := func(id int, a builds.Augment) {
+		addCandidates(cands, a)
+		for _, n := range []string{a.Name, a.NameCN} {
+			if n != "" {
+				names[n] = id
+			}
+		}
+	}
 	for id, a := range s.community.AugmentInfo(ctx, live.Patch, rest) {
 		byID[id] = a
-		addCandidates(cands, a)
+		addName(id, a)
 	}
 	// Names shared by two ids (Arena and Mayhem versions): the one with
 	// statistics for this champion wins, so it is added last.
 	for id, a := range byID {
 		if !slices.Contains(rest, id) {
-			addCandidates(cands, a)
+			addName(id, a)
 		}
 	}
+	st.lastNames = names
 
 	shot := s.tlog.ShotPath(fmt.Sprintf("lv%d", st.pending), false)
 	t0 := time.Now()
@@ -242,6 +265,7 @@ func (s *Server) detectOffer(ctx context.Context, live *liveResponse) (*augmentO
 		s.tlog.Log("scan", map[string]any{"mode": "aram", "level": st.pending, "stage": stage, "error": err.Error(), "capture": s.ocr.Capture(), "ms": time.Since(t0).Milliseconds(), "gameTime": live.GameTime})
 		st.lastStatus = err.Error()
 		if active {
+			s.attachReview(st.last)
 			return st.last, st.lastStatus // keep showing the offer through a failed scan
 		}
 		return &augmentOffer{Pending: true, Level: st.pending, Stage: stage}, st.lastStatus
@@ -253,6 +277,7 @@ func (s *Server) detectOffer(ctx context.Context, live *liveResponse) (*augmentO
 		}
 	}
 	st.lastLines = diag
+	st.lastOCR = lines
 	// Nearly no text in the game window several times in a row: the capture is
 	// probably not showing the game (e.g. exclusive fullscreen).
 	if len(lines) < 3 {
@@ -270,36 +295,72 @@ func (s *Server) detectOffer(ctx context.Context, live *liveResponse) (*augmentO
 		keys = nil
 	}
 	ids := make([]int, 0, len(keys))
-	matched := make([]string, 0, len(keys))
 	for _, k := range keys {
 		id, _ := strconv.Atoi(k.Key)
 		ids = append(ids, id)
+	}
+	// C: a fresh answer from the AI text reader counts as a confirmed read.
+	aiFresh := !st.aiDone.IsZero() && time.Since(st.aiDone) < 8*time.Second
+	cardText := worthAsking(bandLines(lines)) // the card area still shows card-like text
+	via := "ocr"
+	if len(ids) < 2 && aiFresh && cardText && st.aiChoosing && len(st.aiIDs) >= 2 && len(st.aiIDs) <= 4 {
+		ids, via = append([]int(nil), st.aiIDs...), "ai"
+	}
+	matched := make([]string, 0, len(ids))
+	for _, id := range ids {
 		matched = append(matched, byID[id].Name)
 	}
 	sig := fmt.Sprint(ids)
-	if len(keys) >= 2 && sig == st.cand {
+	if len(ids) >= 2 && sig == st.cand {
 		st.candN++
-	} else if len(keys) >= 2 {
+	} else if len(ids) >= 2 {
 		st.cand, st.candN = sig, 1
 	} else {
 		st.cand, st.candN = "", 0
 	}
-	confirmed := len(keys) >= 2 && (st.candN >= 2 || active)
+	confirmed := len(ids) >= 2 && (via == "ai" || st.candN >= 2 || active)
 	s.tlog.Log("scan", map[string]any{"mode": "aram", "level": st.pending, "stage": stage, "dead": me.IsDead, "ms": time.Since(t0).Milliseconds(), "gameTime": live.GameTime,
-		"lines": len(lines), "text": diag, "matched": matched, "confirmed": confirmed, "shot": shot, "lang": s.ocr.Lang(), "capture": s.ocr.Capture()})
+		"lines": len(lines), "text": diag, "matched": matched, "via": via, "confirmed": confirmed, "shot": shot, "lang": s.ocr.Lang(), "capture": s.ocr.Capture()})
+
+	// C: OCR read Chinese text in the card area but could not match two names
+	// (misread characters): send the text to the AI. Only when the text looks
+	// like cards (startTextRead checks), at most every 8 s, while a pick is due
+	// early on, while dead, after a half read, or to follow an AI-read offer.
+	// About 600 tokens, a small fraction of a US cent.
+	if s.aiOn("text") && len(keys) < 2 && !st.aiRunning && time.Since(st.aiAt) >= 8*time.Second {
+		half := len(keys) == 1
+		following := active && st.last.Via == "ai"
+		if half || following || me.IsDead || time.Since(st.pendingAt) < 90*time.Second {
+			why := "early"
+			switch {
+			case following:
+				why = "follow"
+			case half:
+				why = "half-read"
+			case me.IsDead:
+				why = "dead"
+			}
+			s.startTextRead(lines, names, why)
+		}
+	}
 
 	if !confirmed {
-		// A confirmed offer that is gone (two scans without it): the pick is
-		// done. Plan A: record the hotkey-marked one, else the recommended one.
-		if active && len(keys) < 2 && time.Since(st.last.ScannedAt) > 3*time.Second {
-			s.recordPick(st.last, me.Champion.Name)
-			st.seenLevel[st.pending] = true
-			st.pending = 0
-			st.last = nil
-			st.cand, st.candN = "", 0
-			return nil, st.lastStatus
-		}
 		if active {
+			// Is the confirmed offer gone? OCR offers: two scans without them.
+			// AI-read offers: the AI says no choice is shown (or it went quiet).
+			gone := len(keys) < 2 && time.Since(st.last.ScannedAt) > 3*time.Second
+			if st.last.Via == "ai" {
+				gone = (aiFresh && !st.aiChoosing) || (!cardText && time.Since(st.last.ScannedAt) > 3*time.Second) || time.Since(st.last.ScannedAt) > 40*time.Second
+			}
+			if gone {
+				s.recordPick(st.last, me.Champion.Name)
+				st.seenLevel[st.pending] = true
+				st.pending = 0
+				st.last = nil
+				st.cand, st.candN = "", 0
+				return nil, st.lastStatus
+			}
+			s.attachReview(st.last)
 			return st.last, st.lastStatus
 		}
 		// Give up waiting after a long time so the next threshold can arm.
@@ -316,7 +377,7 @@ func (s *Server) detectOffer(ctx context.Context, live *liveResponse) (*augmentO
 			offered = append(offered, a)
 		}
 	}
-	off := &augmentOffer{Active: true, Level: st.pending, Stage: stage, ScannedAt: time.Now(), Lines: diag, Chosen: st.chosen}
+	off := &augmentOffer{Active: true, Level: st.pending, Stage: stage, ScannedAt: time.Now(), Lines: diag, Chosen: st.chosen, Via: via, sig: sig}
 	for _, a := range offered {
 		off.Screen = append(off.Screen, a.ID)
 	}
@@ -342,6 +403,9 @@ func (s *Server) detectOffer(ctx context.Context, live *liveResponse) (*augmentO
 	if !active {
 		st.chosen = 0
 		off.Chosen = 0
+		if s.aiOn("review") {
+			s.startReview(sig, off, live)
+		}
 		cards := make([]map[string]any, 0, len(off.Offered))
 		for _, c := range off.Offered {
 			cards = append(cards, map[string]any{"id": c.ID, "name": c.Name, "score": round4(c.Score), "stageWinRate": c.StageWR, "stageGames": c.StageGames,
@@ -351,6 +415,7 @@ func (s *Server) detectOffer(ctx context.Context, live *liveResponse) (*augmentO
 			"source": off.Source, "cards": cards, "best": off.Best, "note": off.Note, "shot": s.tlog.ShotPath("offer", true)})
 		s.log.Info("augment offer detected", "level", off.Level, "offered", len(off.Offered), "best", off.Best)
 	}
+	s.attachReview(off)
 	st.last = off
 	return off, st.lastStatus
 }
@@ -632,4 +697,16 @@ func tierLetter(t int) string {
 		return string("SABCD"[t-1])
 	}
 	return "?"
+}
+
+// attachReview puts the current AI review of an offer on it (a copy, so the
+// response can be encoded after the lock is released). Caller holds s.offer.mu.
+func (s *Server) attachReview(off *augmentOffer) {
+	if off == nil || s.offer.reviews == nil {
+		return
+	}
+	if v := s.offer.reviews[off.sig]; v != nil {
+		cp := *v
+		off.AI = &cp
+	}
 }

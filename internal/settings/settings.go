@@ -16,11 +16,16 @@ type Settings struct {
 	// Testing aid (remove with internal/logupload): upload logs to GitHub.
 	GitHubToken string `json:"githubToken"` // never logged or echoed back
 	AutoUpload  bool   `json:"autoUpload"`  // upload after every game
+	// AI second opinion (DeepSeek); nothing runs without a key.
+	DeepSeekKey string `json:"deepseekKey"` // never logged or echoed back
+	AIReview    bool   `json:"aiReview"`    // A: second opinion on each augment choice
+	AIResearch  bool   `json:"aiResearch"`  // B: web research before a game
+	AIText      bool   `json:"aiText"`      // C: let the AI work out the cards from the OCR text when matching fails
 }
 
 // Defaults returns the initial configuration.
 func Defaults() Settings {
-	return Settings{OCR: true, UpdateCheck: true, TestLog: true}
+	return Settings{OCR: true, UpdateCheck: true, TestLog: true, AIReview: true, AIResearch: true, AIText: true}
 }
 
 // Store is a mutex-guarded settings file.
@@ -71,5 +76,13 @@ func (s Settings) Masked() map[string]any {
 		hint = "••••" + s.GitHubToken[n-4:]
 	}
 	return map[string]any{"ocr": s.OCR, "updateCheck": s.UpdateCheck, "testLog": s.TestLog, "logShots": s.LogShots,
-		"githubTokenSet": s.GitHubToken != "", "githubTokenHint": hint, "autoUpload": s.AutoUpload}
+		"githubTokenSet": s.GitHubToken != "", "githubTokenHint": hint, "autoUpload": s.AutoUpload,
+		"deepseekKeySet": s.DeepSeekKey != "", "deepseekKeyHint": tail(s.DeepSeekKey), "aiReview": s.AIReview, "aiResearch": s.AIResearch, "aiText": s.AIText}
+}
+
+func tail(secret string) string {
+	if n := len(secret); n > 4 {
+		return "••••" + secret[n-4:]
+	}
+	return ""
 }

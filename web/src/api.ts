@@ -1,4 +1,4 @@
-import type { AugBuildResponse, AugPick, Build, Champion, ChampionInfo, Game, Mastery, PlayRecord, SettingsView, Status, UpdateInfo } from './types'
+import type { AugBuildResponse, AugPick, Build, Champion, Research, ChampionInfo, Game, Mastery, PlayRecord, SettingsView, Status, UpdateInfo } from './types'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...init })
@@ -16,6 +16,7 @@ export const api = {
   augmentBuild: (champion: number, augments: number[], owned: number[]) =>
     req<AugBuildResponse>(`/api/champions/${champion}/augment-build?augments=${augments.join(',')}&owned=${owned.join(',')}`),
   openLogs: () => req<{ dir: string }>('/api/logs/open', { method: 'POST' }),
+  aiResearch: (champion: number, start = false) => req<Research | { status: 'off' }>(`/api/ai/research?champion=${champion}${start ? '&start=1' : ''}`),
   // testing aid: push the logs to the repository's test-logs branch
   uploadLogs: () => req<{ uploaded: number; skipped: number; url: string }>('/api/logs/upload', { method: 'POST' }),
   info: (key: string) => req<{ champion: Champion; info?: ChampionInfo }>(`/api/champions/${encodeURIComponent(key)}/info`),
@@ -45,6 +46,7 @@ export interface Hotkeys {
   pick2: string
   pick3: string
   toggle: string
+  aiLook: string
 }
 
 export type OverlayPos = 'bottom-left' | 'top-left' | 'left-middle' | 'top-right' | 'bottom-right'

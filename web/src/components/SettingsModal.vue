@@ -43,6 +43,7 @@ const HOTKEY_ROWS: { key: keyof Hotkeys; label: string }[] = [
   { key: 'pick2', label: '标记选了第 2 个' },
   { key: 'pick3', label: '标记选了第 3 个' },
   { key: 'toggle', label: '显示 / 隐藏小窗' },
+  { key: 'aiLook', label: '让 AI 根据识别出的文字分析强化' },
 ]
 const prettyKey = (k: string) => k.replace('CommandOrControl', 'Ctrl')
 const hkDraft = ref<Partial<Hotkeys>>({})
@@ -129,6 +130,16 @@ function download() {
   if (upd.value?.url) window.open(upd.value.url, '_blank', 'noopener,noreferrer')
 }
 
+const dsKey = ref('')
+async function saveDsKey() {
+  if (!dsKey.value) return
+  if (await save({ deepseekKey: dsKey.value })) dsKey.value = ''
+}
+const AI_TOGGLES: { key: 'aiReview' | 'aiResearch' | 'aiText'; label: string; desc: string }[] = [
+  { key: 'aiReview', label: 'A. 选强化时 AI 复核', desc: '识别到强化后，把你的英雄、装备、双方阵容和胜率数据发给 AI，几秒后给出它的看法（同意或建议改选）。每次不到 0.1 美分。' },
+  { key: 'aiResearch', label: 'B. 联网整理英雄攻略', desc: '进游戏后 AI 联网搜索这个英雄的乱斗玩法，结合胜率数据写一份攻略，A 复核时也会参考。每个英雄每个版本一次，不到 1 美分。' },
+  { key: 'aiText', label: 'C. 识别不准时让 AI 根据文字推断', desc: '屏幕读到了文字但对不上强化名（错字、漏字）时，把识别出的文字发给 AI 推断是哪几个强化。只发文字，不发截图。每次不到 0.1 美分。' },
+]
 const ghToken = ref('')
 const uploading = ref(false)
 async function saveToken() {
@@ -256,6 +267,50 @@ onBeforeUnmount(() => {
               </dt>
               <dd>
                 <button type="button" @click="openLogs">打开日志文件夹</button>
+              </dd>
+            </div>
+          </dl>
+
+          <!-- AI second opinion (DeepSeek) -->
+          <h3>AI 辅助（DeepSeek）</h3>
+          <p class="muted lead">
+            用 DeepSeek 给强化推荐做第二意见，胜率数据仍然是主推荐。需要你自己的 API key：在
+            <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noreferrer">DeepSeek 开放平台</a>
+            充值后新建一个 key，粘贴到下面。key 只存在本机，只发给 api.deepseek.com。
+          </p>
+          <dl class="rows">
+            <div class="setting wide">
+              <dt>
+                <span class="lbl">
+                  <label for="set-dskey">DeepSeek API key</label>
+                  <span class="badge" :class="{ riot: s.deepseekKeySet }">{{ s.deepseekKeySet ? `已设置 ${s.deepseekKeyHint}` : '未设置' }}</span>
+                </span>
+              </dt>
+              <dd>
+                <input id="set-dskey" v-model="dsKey" type="password" class="key" placeholder="sk-…" autocomplete="off" spellcheck="false" @keydown.enter.prevent="saveDsKey" />
+                <button type="button" class="primary" :disabled="busy || !dsKey" @click="saveDsKey">保存</button>
+                <button type="button" class="danger" :disabled="busy || !s.deepseekKeySet" @click="save({ deepseekKey: '' })">清除</button>
+              </dd>
+            </div>
+            <div v-for="t in AI_TOGGLES" :key="t.key" class="setting">
+              <dt>
+                <span class="lbl"><label :id="'set-lbl-' + t.key" :for="'set-' + t.key">{{ t.label }}</label></span>
+                <span class="desc muted">{{ t.desc }}</span>
+              </dt>
+              <dd>
+                <button :id="'set-' + t.key" type="button" role="switch" class="toggle" :class="{ on: s[t.key] }" :aria-checked="s[t.key]" :aria-labelledby="'set-lbl-' + t.key" :disabled="!s.deepseekKeySet" @click="save({ [t.key]: !s[t.key] })">
+                  <span class="track" aria-hidden="true" /><span class="state">{{ s[t.key] ? '开' : '关' }}</span>
+                </button>
+              </dd>
+            </div>
+            <div class="setting">
+              <dt>
+                <span class="lbl">本月花费</span>
+                <span class="desc muted">按 DeepSeek 官方价格估算（工作日 9–12 点、14–18 点（UTC+8）价格翻倍），以平台账单为准。</span>
+              </dt>
+              <dd class="usage">
+                <b>${{ s.aiUsage.usd.toFixed(4) }}</b>
+                <span class="muted">{{ s.aiUsage.calls }} 次对话 · {{ s.aiUsage.searches }} 次搜索 · {{ (s.aiUsage.tokens / 1000).toFixed(1) }}k tokens</span>
               </dd>
             </div>
           </dl>
@@ -514,4 +569,6 @@ onBeforeUnmount(() => {
   .setting.wide { grid-template-columns: 1fr; }
   .setting dd { justify-content: flex-start; }
 }
+.usage { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: 12px; }
+.usage b { font-size: 15px; }
 </style>

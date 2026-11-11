@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aarlint/ezlol/internal/ai"
 	"github.com/aarlint/ezlol/internal/builds"
 	"github.com/aarlint/ezlol/internal/ddragon"
 	"github.com/aarlint/ezlol/internal/live"
@@ -40,6 +41,9 @@ type Server struct {
 	ocr       *screen.Reader
 	tlog      *testlog.Logger
 	repo      string // owner/name of this build's GitHub repository (log uploads)
+	dataDir   string
+	ai        *ai.Client
+	aiSt      aiState
 	upload    uploadState
 	offer     offerState
 	ui        fs.FS  // built frontend, may be nil in dev
@@ -47,8 +51,9 @@ type Server struct {
 }
 
 // New wires a server.
-func New(log *slog.Logger, w *watcher.Watcher, dd *ddragon.Store, community *builds.Community, cfg *settings.Store, upd *update.Checker, tlog *testlog.Logger, repo, version string, ui fs.FS, devProxy string) *Server {
-	return &Server{log: log, watcher: w, dd: dd, community: community, repo: repo, settings: cfg, update: upd, tlog: tlog, version: version, live: live.New(), ocr: screen.New(), ui: ui, devProxy: devProxy}
+func New(log *slog.Logger, w *watcher.Watcher, dd *ddragon.Store, community *builds.Community, cfg *settings.Store, upd *update.Checker, tlog *testlog.Logger, dataDir, repo, version string, ui fs.FS, devProxy string) *Server {
+	aic := newAIClient(dataDir, func() string { return cfg.Get().DeepSeekKey })
+	return &Server{log: log, watcher: w, dd: dd, community: community, repo: repo, dataDir: dataDir, ai: aic, settings: cfg, update: upd, tlog: tlog, version: version, live: live.New(), ocr: screen.New(), ui: ui, devProxy: devProxy}
 }
 
 // Handler builds the router.
@@ -61,6 +66,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/game", s.game)
 	mux.HandleFunc("POST /api/game/pick", s.correctPick)
 	mux.HandleFunc("POST /api/game/pick-slot", s.pickSlot)
+	mux.HandleFunc("POST /api/game/ai-look", s.aiLook)
+	mux.HandleFunc("GET /api/ai/research", s.aiResearch)
 	mux.HandleFunc("GET /api/champions/{key}/augment-build", s.augmentBuild)
 	mux.HandleFunc("POST /api/logs/open", s.openLogs)
 	mux.HandleFunc("POST /api/logs/upload", s.uploadLogs)

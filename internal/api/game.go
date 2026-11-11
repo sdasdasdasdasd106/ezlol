@@ -36,8 +36,9 @@ type liveResponse struct {
 	Players  []livePlayer  `json:"-"`
 	Picks    []augPick     `json:"picks"` // augments taken this game (ARAM Mayhem)
 	Offer    *augmentOffer `json:"offer,omitempty"`
-	OCR      string        `json:"ocr"`     // available | disabled | unavailable | error text
-	OCRLang  string        `json:"ocrLang"` // language the OCR helper reads, e.g. zh-Hans-CN
+	OCR      string        `json:"ocr"`                // available | disabled | unavailable | error text
+	OCRLang  string        `json:"ocrLang"`            // language the OCR helper reads, e.g. zh-Hans-CN
+	Research *researchView `json:"research,omitempty"` // AI strategy card for this champion
 }
 
 // game reports your champion and level in the running game, plus the augment
@@ -91,6 +92,11 @@ func (s *Server) game(w http.ResponseWriter, r *http.Request) {
 	}
 	resp.Offer, resp.OCR = s.detectOffer(r.Context(), &resp)
 	resp.OCRLang = s.ocr.Lang()
+	if resp.Me != nil && resp.Mode == "aram" {
+		if q := s.watcher.Status().QueueID; q != 450 && q != 100 {
+			resp.Research = s.research(resp.Me.Champion.ID, true)
+		}
+	}
 	resp.Picks = s.Picks()
 	writeJSON(w, 200, resp)
 }

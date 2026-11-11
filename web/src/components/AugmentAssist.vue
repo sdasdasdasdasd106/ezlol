@@ -57,6 +57,12 @@ async function correct(p: AugPick, id: number) {
   }
 }
 
+// The AI's pick, marked on its card when it differs from the statistics' pick.
+const aiPick = (name: string) => {
+  const r = offer.value?.ai
+  return r?.status === 'done' && !r.agree && r.pick === name
+}
+
 let pinged = false
 let announced = 0
 watch(offer, (off) => {
@@ -101,12 +107,20 @@ watch(
       <div v-if="offer?.active && offer.offered?.length" class="pick">
         <div class="take">选「{{ offer.best }}」<span v-if="offer.stage" class="why">{{ STAGE[offer.stage] }}强化</span></div>
         <div v-if="offer.note" class="gap">{{ offer.note }}</div>
+        <div v-if="offer.ai" class="ai" :class="[offer.ai.status, { agree: offer.ai.agree }]">
+          <template v-if="offer.ai.status === 'pending'">AI 正在复核这次选择…</template>
+          <template v-else-if="offer.ai.status === 'error'">AI 复核失败：{{ offer.ai.error }}</template>
+          <template v-else>
+            <b>{{ offer.ai.agree ? 'AI 同意' : `AI 建议改选「${offer.ai.pick}」` }}</b><span v-if="offer.ai.confidence" class="conf">把握{{ offer.ai.confidence }}</span>：{{ offer.ai.reason }}
+          </template>
+        </div>
+        <div v-if="offer.via === 'ai'" class="gap">这组强化是 AI 根据识别出的文字推断的，可能不准；不对的话选完按快捷键标记。</div>
         <div class="cards">
           <div v-for="(a, i) in offer.offered" :key="a.id" class="card" :class="[a.rarity, { best: i === 0 }]" :title="a.desc">
             <div class="head">
               <img v-if="a.icon" :src="a.icon" :alt="a.name" /><span v-else class="noicon" />
               <div class="body">
-                <div class="n"><span v-if="tierLabel(a.tier)" class="tp" :class="'t' + a.tier">{{ tierLabel(a.tier) }}</span>{{ a.name }}<span v-if="i === 0" class="rec">推荐</span></div>
+                <div class="n"><span v-if="tierLabel(a.tier)" class="tp" :class="'t' + a.tier">{{ tierLabel(a.tier) }}</span>{{ a.name }}<span v-if="i === 0" class="rec">推荐</span><span v-if="aiPick(a.name)" class="rec aipick">AI</span></div>
                 <div class="s">{{ statLine(a) }}</div>
               </div>
             </div>
@@ -155,6 +169,13 @@ watch(
 .take { font-family: var(--display); font-size: 18px; font-weight: 700; color: var(--hextech-2); margin-bottom: 4px; }
 .why { font-family: inherit; font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 10px; }
 .gap { font-size: 12px; color: var(--gold-bright); margin-bottom: 8px; }
+.ai { font-size: 12px; margin-bottom: 8px; padding: 4px 8px; border-left: 3px solid var(--gold-deep); background: var(--surface-raised); line-height: 1.5; }
+.ai.pending { color: var(--muted); }
+.ai.error { color: var(--muted); border-left-color: var(--red, #e84057); }
+.ai.done { border-left-color: #f0d48a; }
+.ai.done.agree { border-left-color: var(--hextech-2); }
+.ai .conf { color: var(--muted); margin-left: 6px; }
+.rec.aipick { margin-left: 4px; color: #f0d48a; border-color: #f0d48a; }
 .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 @media (max-width: 900px) { .cards { grid-template-columns: 1fr; } }
 .card { padding: 8px; border: 1px solid var(--gold-deep); background: var(--surface-raised); min-width: 0; display: flex; flex-direction: column; gap: 6px; }

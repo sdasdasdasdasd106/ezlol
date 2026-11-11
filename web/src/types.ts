@@ -99,6 +99,31 @@ export interface AugmentOffer {
   why?: string
   note?: string
   source?: string
+  via?: 'ocr' | 'ai'
+  ai?: AIReview
+}
+
+/** The AI's (DeepSeek) second opinion on an augment choice. */
+export interface AIReview {
+  status: 'pending' | 'done' | 'error'
+  pick?: string
+  reason?: string
+  agree: boolean
+  confidence?: string
+  error?: string
+  seconds?: number
+}
+
+export interface StrategyAug {
+  name: string
+  why: string
+}
+
+/** The AI's pre-game strategy card for a champion (web research). */
+export interface Research {
+  status: 'none' | 'pending' | 'done' | 'error'
+  strategy?: { summary: string; prefer: StrategyAug[] | null; avoid: StrategyAug[] | null; build: string[] | null; sources: string[] | null; at: string }
+  error?: string
 }
 
 /** An augment taken this game; assumed = the recommended one was guessed. */
@@ -199,6 +224,12 @@ export interface SettingsView {
   autoUpload: boolean
   uploadRepo: string
   lastUpload?: { at: string; why: string; uploaded: number; skipped: number; url: string; error?: string } | null
+  deepseekKeySet: boolean
+  deepseekKeyHint: string
+  aiReview: boolean
+  aiResearch: boolean
+  aiText: boolean
+  aiUsage: { month: string; calls: number; searches: number; tokens: number; usd: number }
   version: string
 }
 export interface UpdateInfo {
@@ -223,4 +254,5 @@ export interface Game {
   offer?: AugmentOffer
   ocr: string
   ocrLang: string
+  research?: Research
 }

@@ -14,7 +14,7 @@ import type { AugBuildResponse, Game, OfferCard } from '../types'
 const game = ref<Game | null>(null)
 const plan = ref<AugBuildResponse | null>(null)
 const mode = ref<'auto' | 'pinned' | 'hidden'>('auto')
-const hotkeys = ref({ pick1: 'Ctrl+Shift+1', pick2: 'Ctrl+Shift+2', pick3: 'Ctrl+Shift+3', toggle: 'Ctrl+Shift+H' })
+const hotkeys = ref({ pick1: 'Ctrl+Shift+1', pick2: 'Ctrl+Shift+2', pick3: 'Ctrl+Shift+3', toggle: 'Ctrl+Shift+H', aiLook: 'Ctrl+Shift+A' })
 const flash = ref('') // hotkey feedback
 const preview = ref(false)
 const infoUntil = ref(0)
@@ -145,11 +145,16 @@ onUnmounted(() => {
         <span class="muted">{{ STAGE[offer.stage] }}强化<template v-if="preview"> · 预览</template></span>
       </div>
       <div v-if="offer.note" class="note">{{ offer.note }}</div>
+      <div v-if="offer.ai && offer.ai.status !== 'error'" class="ai" :class="{ agree: offer.ai.agree }">
+        <template v-if="offer.ai.status === 'pending'">AI 复核中…</template>
+        <template v-else><b>{{ offer.ai.agree ? 'AI 同意' : `AI 建议「${offer.ai.pick}」` }}</b>：{{ offer.ai.reason }}</template>
+      </div>
+      <div v-if="offer.via === 'ai'" class="note">这组是 AI 根据文字推断的，可能不准</div>
       <div v-for="(c, i) in cards" :key="c.id" class="row" :class="[c.rarity, { best: c.id === bestId, chosen: offer.chosen === i + 1 }]">
         <span class="slot">{{ i + 1 }}</span>
         <div class="body">
           <div class="name">
-            {{ c.name }}<span v-if="c.id === bestId" class="rec">推荐</span><span v-if="offer.chosen === i + 1" class="mark">已标记</span>
+            {{ c.name }}<span v-if="c.id === bestId" class="rec">推荐</span><span v-if="offer.ai?.status === 'done' && !offer.ai.agree && offer.ai.pick === c.name" class="mark">AI</span><span v-if="offer.chosen === i + 1" class="mark">已标记</span>
             <span class="wr">{{ c.stageGames ? `${pct(c.stageWinRate)} ${signed(c.lift)}` : '数据少' }}</span>
           </div>
           <div v-for="(r, j) in c.reasons.slice(1, 3)" :key="j" class="why" :class="{ warn: r.startsWith('注意') || r.startsWith('和你现在的装备不太搭') }">{{ r }}</div>
@@ -183,6 +188,8 @@ onUnmounted(() => {
 .top { display: flex; align-items: baseline; gap: 10px; margin-bottom: 2px; }
 .take { font-size: 18px; font-weight: 700; color: #0ac8b9; }
 .note { font-size: 12px; color: #f0d48a; margin-bottom: 6px; }
+.ai { font-size: 12px; margin-bottom: 4px; padding-left: 6px; border-left: 2px solid #f0d48a; color: #e6dcc4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ai.agree { border-left-color: #0ac8b9; }
 .row { display: flex; gap: 8px; padding: 5px 6px; margin-top: 4px; border: 1px solid rgba(120, 90, 40, 0.8); border-left-width: 3px; background: rgba(30, 35, 40, 0.6); }
 .row.prismatic { border-left-color: #3fb4d8; } .row.gold { border-left-color: #c8aa6e; } .row.silver { border-left-color: #8b9bb0; }
 .row.best { border-color: #0ac8b9; }

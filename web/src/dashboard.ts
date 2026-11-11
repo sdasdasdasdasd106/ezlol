@@ -29,6 +29,7 @@ const P = (x: number, y: number, w: number, h: number): Pos => ({ x, y, w, h })
 const LOBBY: Record<string, Pos> = {
   items: P(0, 0, 3, 12), boots: P(3, 0, 3, 12), 'aug-build': P(6, 0, 6, 12),
   'aug-prismatic': P(0, 12, 4, 10), 'aug-gold': P(4, 12, 4, 10), 'aug-silver': P(8, 12, 4, 10),
+  'ai-strategy': P(0, 22, 12, 8),
 }
 export const DEFAULT_LAYOUTS: Record<ModeKey, Record<string, Pos>> = {
   idle: LOBBY,
@@ -37,6 +38,7 @@ export const DEFAULT_LAYOUTS: Record<ModeKey, Record<string, Pos>> = {
     'augment-assist': P(0, 0, 6, 14), 'aug-build': P(6, 0, 6, 14),
     items: P(0, 14, 3, 12), boots: P(3, 14, 3, 12),
     'aug-prismatic': P(6, 14, 3, 10), 'aug-gold': P(9, 14, 3, 10), 'aug-silver': P(6, 24, 3, 10),
+    'ai-strategy': P(0, 26, 6, 10),
   },
 }
 
@@ -55,6 +57,7 @@ const COMMON: WidgetSpec[] = [
   { id: 'aug-prismatic', title: '棱彩强化', w: 3, h: 10 },
   { id: 'aug-gold', title: '金色强化', w: 3, h: 10 },
   { id: 'aug-silver', title: '银色强化', w: 3, h: 10 },
+  { id: 'ai-strategy', title: 'AI 攻略', w: 6, h: 8 },
 ]
 export const CATALOG: Record<ModeKey, WidgetSpec[]> = {
   idle: COMMON,
@@ -65,7 +68,7 @@ export const CATALOG: Record<ModeKey, WidgetSpec[]> = {
 const COLUMNS = 12
 const CELL = 40
 const MARGIN = 6
-const STORE = 'ezlol.layout.v7' // v7: ARAM Mayhem only
+const STORE = 'ezlol.layout.v8' // v8: AI strategy card
 const PRESET = 'ezlol.layout.preset.v5' // user-saved arrangements, restored by Reset
 
 type Layouts = Record<string, Record<string, Pos>>

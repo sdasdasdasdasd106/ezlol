@@ -17,6 +17,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	m["logDir"] = s.tlog.Dir()
 	m["uploadRepo"] = s.repo
 	m["lastUpload"] = s.lastUpload()
+	m["aiUsage"] = s.ai.Usage.Snapshot()
 	m["version"] = s.version
 	writeJSON(w, 200, m)
 }
@@ -30,6 +31,10 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		LogShots    *bool   `json:"logShots"`
 		GitHubToken *string `json:"githubToken"`
 		AutoUpload  *bool   `json:"autoUpload"`
+		DeepSeekKey *string `json:"deepseekKey"`
+		AIReview    *bool   `json:"aiReview"`
+		AIResearch  *bool   `json:"aiResearch"`
+		AIText      *bool   `json:"aiText"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
 		writeErr(w, 400, "请求格式不对")
@@ -53,6 +58,18 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.AutoUpload != nil {
 			st.AutoUpload = *body.AutoUpload
+		}
+		if body.DeepSeekKey != nil {
+			st.DeepSeekKey = strings.TrimSpace(*body.DeepSeekKey)
+		}
+		if body.AIReview != nil {
+			st.AIReview = *body.AIReview
+		}
+		if body.AIResearch != nil {
+			st.AIResearch = *body.AIResearch
+		}
+		if body.AIText != nil {
+			st.AIText = *body.AIText
 		}
 	})
 	if err != nil {

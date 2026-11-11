@@ -35,3 +35,16 @@ func TestTokenNeverEchoed(t *testing.T) {
 		t.Fatalf("view: %v", m)
 	}
 }
+
+func TestDeepSeekKeyNeverEchoed(t *testing.T) {
+	s := Settings{DeepSeekKey: "sk-abcdef123456"}
+	m := s.Masked()
+	for _, v := range m {
+		if str, ok := v.(string); ok && str == s.DeepSeekKey {
+			t.Fatal("raw key in the settings view")
+		}
+	}
+	if m["deepseekKeySet"] != true || m["deepseekKeyHint"] != "••••3456" {
+		t.Fatalf("view: %v", m)
+	}
+}
