@@ -5,12 +5,12 @@
 import { computed, ref, watch } from 'vue'
 import Widget from './Widget.vue'
 import * as sound from '../sound'
-import { api } from '../api'
+import { api, DEFAULT_HOTKEYS, prettyHotkey } from '../api'
 import { dismissKey, toast } from '../toast'
 import type { AugPick, Game, OfferCard } from '../types'
 
 const props = defineProps<{ game: Game | null }>()
-const emit = defineEmits<{ picks: [p: AugPick[]] }>()
+const emit = defineEmits<{ picks: [p: AugPick[]]; refresh: [] }>()
 
 const offer = computed(() => props.game?.offer)
 const mode = computed(() => props.game?.mode ?? '')
@@ -43,6 +43,27 @@ const langWarn = computed(() => {
   const l = props.game?.ocrLang ?? ''
   return l && !l.startsWith('zh') ? `识别语言是 ${l}，认不出中文强化名：请在 Windows 设置里安装「中文(简体)」的光学字符识别，然后重启 ezlol。` : ''
 })
+
+// "Read it now": the same as the scan hotkey, for a second screen or a windowed game.
+const scanKey = ref(prettyHotkey(DEFAULT_HOTKEYS.scan))
+window.ezlol?.getAppSettings?.().then((a) => (scanKey.value = prettyHotkey(a.hotkeys.scan))).catch(() => {})
+window.ezlol?.onAppSettings?.((a) => (scanKey.value = prettyHotkey(a.hotkeys.scan)))
+const scanning = ref(false)
+const scanMsg = ref('')
+async function scanNow() {
+  scanning.value = true
+  scanMsg.value = ''
+  try {
+    const r = await api.scanNow()
+    scanMsg.value = r.status === 'ai' ? (r.message ?? 'AI 正在推断…') : ''
+  } catch (e) {
+    scanMsg.value = (e as Error).message
+  } finally {
+    scanning.value = false
+    emit('refresh')
+  }
+}
+const canScan = computed(() => !!props.game?.inGame && mode.value === 'aram' && !props.game?.offer?.waiting && !['unavailable', 'disabled'].includes(props.game?.ocr ?? ''))
 
 // Correcting an assumed pick.
 const fixing = ref<number | null>(null)
@@ -97,7 +118,11 @@ watch(
 
 <template>
   <Widget id="augment-assist" :w="6">
-    <h2>强化推荐 <span v-if="game?.me" class="muted sub">{{ game.me.champion.name }} · {{ game.me.level }} 级</span></h2>
+    <h2>
+      强化推荐 <span v-if="game?.me" class="muted sub">{{ game.me.champion.name }} · {{ game.me.level }} 级</span>
+      <button v-if="canScan" class="sm scan" :disabled="scanning" :title="`截屏识别现在屏幕上的强化（游戏里按 ${scanKey}）`" @click="scanNow">{{ scanning ? '识别中…' : '立即识别' }}</button>
+    </h2>
+    <div v-if="scanMsg" class="note">{{ scanMsg }}</div>
 
     <div v-if="!game?.inGame" class="muted">
       进入海克斯乱斗后，这里会自动识别屏幕上的强化选项并告诉你选哪个。
@@ -114,7 +139,7 @@ watch(
             <b>{{ offer.ai.agree ? 'AI 同意' : `AI 建议改选「${offer.ai.pick}」` }}</b><span v-if="offer.ai.confidence" class="conf">把握{{ offer.ai.confidence }}</span>：{{ offer.ai.reason }}
           </template>
         </div>
-        <div v-if="offer.via === 'ai'" class="gap">这组强化是 AI 根据识别出的文字推断的，可能不准；不对的话选完按快捷键标记。</div>
+        <div v-if="offer.via === 'ai'" class="gap">这组强化是 AI 根据识别出的文字推断的，可能不准；不对的话选完按快捷键记下选的第几个。</div>
         <div class="cards">
           <div v-for="(a, i) in offer.offered" :key="a.id" class="card" :class="[a.rarity, { best: i === 0 }]" :title="a.desc">
             <div class="head">
@@ -139,10 +164,10 @@ watch(
       </div>
       <div v-else-if="offer?.waiting" class="muted">还在加载画面，进入游戏后开始识别。</div>
       <div v-else-if="offer?.pending" class="wait">
-        {{ offer.level <= 1 ? '开局' : `${offer.level} 级` }}的强化待选——打开选择界面后会自动识别。
+        {{ offer.level <= 1 ? '开局' : `${offer.level} 级` }}的强化待选——打开选择界面后按 <b>{{ scanKey }}</b> 立即识别<template v-if="game?.autoScan !== false">，不按也会自动识别（要等几秒）</template>。
       </div>
       <div v-else class="muted">
-        开局和 7 / 11 / 15 级时会出现强化选择，到时会自动识别。
+        开局和 7 / 11 / 15 级时会出现强化选择，打开后按 <b>{{ scanKey }}</b> 立即识别<template v-if="game?.autoScan !== false">（不按也会自动识别）</template>。
       </div>
 
       <!-- Augments taken so far; an assumed one can be corrected -->
@@ -166,6 +191,7 @@ watch(
 
 <style scoped>
 .sub { text-transform: none; letter-spacing: 0; margin-left: 8px; }
+h2 .scan { margin-left: auto; float: right; text-transform: none; letter-spacing: 0; }
 .take { font-family: var(--display); font-size: 18px; font-weight: 700; color: var(--hextech-2); margin-bottom: 4px; }
 .why { font-family: inherit; font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 10px; }
 .gap { font-size: 12px; color: var(--gold-bright); margin-bottom: 8px; }

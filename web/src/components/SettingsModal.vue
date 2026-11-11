@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from '../api'
 import type { SettingsView, UpdateInfo } from '../types'
+import { DEFAULT_HOTKEYS, hotkeyFromEvent, prettyHotkey } from '../api'
 import type { AppSettings, Hotkeys, OverlayPos } from '../api'
 import * as sound from '../sound'
 
@@ -38,21 +39,67 @@ const POSITIONS: { id: OverlayPos; label: string }[] = [
   { id: 'top-right', label: '右上角' },
   { id: 'bottom-right', label: '右下角' },
 ]
-const HOTKEY_ROWS: { key: keyof Hotkeys; label: string }[] = [
-  { key: 'pick1', label: '标记选了第 1 个' },
-  { key: 'pick2', label: '标记选了第 2 个' },
-  { key: 'pick3', label: '标记选了第 3 个' },
-  { key: 'toggle', label: '显示 / 隐藏小窗' },
-  { key: 'aiLook', label: '让 AI 根据识别出的文字分析强化' },
+const HOTKEY_ROWS: { key: keyof Hotkeys; label: string; desc: string }[] = [
+  { key: 'scan', label: '立即识别强化', desc: '强化选择界面打开后按一下：马上截屏识别并给出推荐，不用等自动识别。' },
+  { key: 'pick1', label: '选了第 1 个', desc: '选完按：马上记下你选的是左边第 1 个（不按就记为推荐的那个）。' },
+  { key: 'pick2', label: '选了第 2 个', desc: '同上，中间那个。' },
+  { key: 'pick3', label: '选了第 3 个', desc: '同上，右边那个。' },
+  { key: 'toggle', label: '显示 / 隐藏小窗', desc: '' },
 ]
-const prettyKey = (k: string) => k.replace('CommandOrControl', 'Ctrl')
-const hkDraft = ref<Partial<Hotkeys>>({})
-function saveHotkey(k: keyof Hotkeys) {
-  const raw = (hkDraft.value[k] ?? '').trim().replace(/\s+/g, '').replace(/^Ctrl\+/i, 'CommandOrControl+').replace(/\+Ctrl\+/i, '+CommandOrControl+')
-  if (!appS.value || !raw) return
-  void saveApp({ hotkeys: { ...appS.value.hotkeys, [k]: raw } })
-  hkDraft.value[k] = undefined
+const prettyKey = prettyHotkey
+// Recording a hotkey: click the button, press the combination. The global
+// hotkeys are let go meanwhile so an already-registered one reaches us.
+const recording = ref<keyof Hotkeys | null>(null)
+const recHint = ref('')
+async function startRecord(k: keyof Hotkeys) {
+  recording.value = k
+  recHint.value = '按下新的组合键…（Esc 取消）'
+  await window.ezlol?.suspendHotkeys?.(true)
 }
+async function stopRecord() {
+  if (!recording.value) return
+  recording.value = null
+  recHint.value = ''
+  const v = await window.ezlol?.suspendHotkeys?.(false)
+  if (v) appS.value = v
+}
+function onRecordKey(e: KeyboardEvent, k: keyof Hotkeys) {
+  if (recording.value !== k) return
+  e.preventDefault()
+  e.stopPropagation()
+  if (e.key === 'Escape' && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
+    void stopRecord()
+    return
+  }
+  const r = hotkeyFromEvent(e)
+  if (r.partial) return
+  if (r.error) {
+    recHint.value = r.error
+    return
+  }
+  const accel = r.accel!
+  const other = HOTKEY_ROWS.find((row) => row.key !== k && appS.value?.hotkeys[row.key] === accel)
+  if (other) {
+    recHint.value = `${prettyKey(accel)} 已经用在「${other.label}」上了，换一个`
+    return
+  }
+  recording.value = null
+  recHint.value = ''
+  void (async () => {
+    await window.ezlol?.suspendHotkeys?.(false)
+    if (appS.value) await saveApp({ hotkeys: { ...appS.value.hotkeys, [k]: accel } })
+  })()
+}
+async function resetHotkeys() {
+  if (!window.ezlol?.resetHotkeys) return
+  try {
+    appS.value = await window.ezlol.resetHotkeys()
+    flash('快捷键已恢复默认', 'ok')
+  } catch (e) {
+    flash(errText(e), 'err')
+  }
+}
+const defaultKeys = Object.values(DEFAULT_HOTKEYS).map(prettyHotkey).join('、')
 async function previewOverlay() {
   await window.ezlol?.previewOverlay?.()
   flash('小窗预览 10 秒', 'ok')
@@ -70,7 +117,8 @@ const updateState = computed(() => {
 })
 
 function errText(e: unknown): string {
-  return e instanceof Error ? e.message : String(e)
+  const t = e instanceof Error ? e.message : String(e)
+  return t.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 }
 
 function flash(text: string, kind: 'ok' | 'err') {
@@ -198,6 +246,7 @@ onMounted(() => {
   void load()
 })
 onBeforeUnmount(() => {
+  void stopRecord()
   document.removeEventListener('keydown', onKey)
   clearTimeout(msgTimer)
 })
@@ -230,6 +279,20 @@ onBeforeUnmount(() => {
               <dd>
                 <button id="set-ocr" type="button" role="switch" class="toggle" :class="{ on: s.ocr && s.ocrAvailable }" :aria-checked="s.ocr && s.ocrAvailable" aria-labelledby="set-lbl-ocr" :disabled="!s.ocrAvailable" :title="s.ocrAvailable ? undefined : '这台电脑上用不了屏幕识别'" @click="save({ ocr: !s.ocr })">
                   <span class="track" aria-hidden="true" /><span class="state">{{ s.ocr && s.ocrAvailable ? '开' : '关' }}</span>
+                </button>
+              </dd>
+            </div>
+            <div class="setting">
+              <dt>
+                <span class="lbl"><label id="set-lbl-auto" for="set-auto">到级后自动识别</label></span>
+                <span class="desc muted">
+                  开：到开局 / 7 / 11 / 15 级时在后台每隔一两秒截屏，连续两次读到同一组强化才显示（更稳，但要等几秒）。
+                  关：只在你按「立即识别强化」快捷键时截屏，省电脑资源。两种方式都可以随时按快捷键马上识别。
+                </span>
+              </dt>
+              <dd>
+                <button id="set-auto" type="button" role="switch" class="toggle" :class="{ on: s.autoScan }" :aria-checked="s.autoScan" aria-labelledby="set-lbl-auto" :disabled="!s.ocr || !s.ocrAvailable" @click="save({ autoScan: !s.autoScan })">
+                  <span class="track" aria-hidden="true" /><span class="state">{{ s.autoScan ? '开' : '关' }}</span>
                 </button>
               </dd>
             </div>
@@ -465,12 +528,34 @@ onBeforeUnmount(() => {
               <div v-for="r in HOTKEY_ROWS" :key="r.key" class="setting">
                 <dt>
                   <span class="lbl">{{ r.label }}</span>
-                  <span v-if="appS.hotkeyErrors?.includes(appS.hotkeys[r.key])" class="desc warn">这个组合键被别的程序占用了，换一个。</span>
-                  <span v-else class="desc muted">当前：{{ prettyKey(appS.hotkeys[r.key]) }}</span>
+                  <span v-if="recording === r.key" class="desc ok">{{ recHint }}</span>
+                  <span v-else-if="appS.hotkeyErrors?.includes(appS.hotkeys[r.key])" class="desc warn">{{ prettyKey(appS.hotkeys[r.key]) }} 被别的程序（QQ、微信、显卡软件等）占用了，点右边换一个。</span>
+                  <span v-else-if="r.desc" class="desc muted">{{ r.desc }}</span>
                 </dt>
                 <dd>
-                  <input v-model="hkDraft[r.key]" class="short" :placeholder="prettyKey(appS.hotkeys[r.key])" spellcheck="false" autocomplete="off" @keydown.enter.prevent="saveHotkey(r.key)" />
-                  <button type="button" :disabled="!hkDraft[r.key]" @click="saveHotkey(r.key)">改</button>
+                  <button
+                    type="button"
+                    class="hk"
+                    :class="{ rec: recording === r.key, bad: appS.hotkeyErrors?.includes(appS.hotkeys[r.key]) }"
+                    :title="recording === r.key ? '按下新的组合键，Esc 取消' : '点一下，然后按下新的组合键'"
+                    @click="recording === r.key ? stopRecord() : startRecord(r.key)"
+                    @keydown="onRecordKey($event, r.key)"
+                    @blur="recording === r.key && stopRecord()"
+                  >
+                    {{ recording === r.key ? '请按键…' : prettyKey(appS.hotkeys[r.key]) }}
+                  </button>
+                </dd>
+              </div>
+              <div class="setting">
+                <dt>
+                  <span class="lbl">恢复默认快捷键</span>
+                  <span class="desc muted">
+                    默认 {{ defaultKeys }}。不用 Ctrl+Shift：中文 Windows 里它会切换输入法，游戏里可能卡住按键。
+                    也可以设成 F7、F8 这样的单键（笔记本可能要同时按 Fn）；单键在 ezlol 开着时别的程序就收不到了。
+                  </span>
+                </dt>
+                <dd>
+                  <button type="button" :disabled="busy" @click="resetHotkeys">恢复默认</button>
                 </dd>
               </div>
             </dl>
@@ -550,6 +635,9 @@ onBeforeUnmount(() => {
 /* Every control shares one height so each row reads as a single line */
 .setting input { height: var(--ctl-h); padding: 0 var(--sp-3); }
 .setting .short { flex: none; width: 96px; }
+.body button.hk { min-width: 132px; justify-content: center; font-family: ui-monospace, Menlo, monospace; }
+.body button.hk.rec { border-color: var(--hextech-2); color: var(--hextech-2); }
+.body button.hk.bad { border-color: var(--amber); color: var(--amber); }
 .setting .key { flex: 1 1 120px; min-width: 0; width: auto; }
 .body button { flex: none; height: var(--ctl-h); padding: 0 var(--sp-3); display: inline-flex; align-items: center; white-space: nowrap; }
 .body button:focus-visible,

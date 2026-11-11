@@ -8,13 +8,14 @@
 //   pinned shown on demand (hotkey) with the current state
 //   none   hide
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { api } from '../api'
+import { api, DEFAULT_HOTKEYS, prettyHotkey } from '../api'
+import type { Hotkeys } from '../api'
 import type { AugBuildResponse, Game, OfferCard } from '../types'
 
 const game = ref<Game | null>(null)
 const plan = ref<AugBuildResponse | null>(null)
 const mode = ref<'auto' | 'pinned' | 'hidden'>('auto')
-const hotkeys = ref({ pick1: 'Ctrl+Shift+1', pick2: 'Ctrl+Shift+2', pick3: 'Ctrl+Shift+3', toggle: 'Ctrl+Shift+H', aiLook: 'Ctrl+Shift+A' })
+const hotkeys = ref<Hotkeys>({ ...DEFAULT_HOTKEYS })
 const flash = ref('') // hotkey feedback
 const preview = ref(false)
 const infoUntil = ref(0)
@@ -23,7 +24,12 @@ const root = ref<HTMLElement | null>(null)
 const STAGE = ['', '开局', '7 级', '11 级', '15 级']
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`
 const signed = (x: number) => `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}%`
-const pretty = (k: string) => k.replace('CommandOrControl', 'Ctrl').replace('Control', 'Ctrl')
+const pretty = prettyHotkey
+// "Ctrl+Alt+1/2/3" when the three keys differ only in the digit.
+const pickKeys = computed(() => {
+  const [a, b, c] = [hotkeys.value.pick1, hotkeys.value.pick2, hotkeys.value.pick3].map(pretty)
+  return a.endsWith('1') && b === a.slice(0, -1) + '2' && c === a.slice(0, -1) + '3' ? `${a}/2/3` : `${a} / ${b} / ${c}`
+})
 
 // Preview data so the position and size can be checked before a game.
 const DEMO: Game = {
@@ -61,10 +67,24 @@ const problem = computed(() => {
   return o === 'unavailable' ? '这台电脑用不了屏幕识别' : o
 })
 
+// A pick is due but no offer is shown yet: say which key reads it now.
+const due = computed(() => {
+  const o = g.value?.offer
+  return o?.pending && !o.active ? o : null
+})
+const dueUntil = ref(0)
+watch(
+  () => (due.value ? `${due.value.level}` : ''),
+  (now, before) => {
+    if (now && now !== before) dueUntil.value = Date.now() + 25000
+  },
+)
+const showDue = computed(() => !!due.value && Date.now() < dueUntil.value + (g.value?.autoScan === false ? 35000 : 0))
+
 const want = computed<'offer' | 'info' | 'pinned' | 'none'>(() => {
   if (preview.value || offer.value) return 'offer'
   if (!g.value?.inGame) return mode.value === 'pinned' ? 'pinned' : 'none'
-  if (Date.now() < infoUntil.value || problem.value) return 'info'
+  if (Date.now() < infoUntil.value || problem.value || showDue.value) return 'info'
   return mode.value === 'pinned' ? 'pinned' : 'none'
 })
 
@@ -103,11 +123,27 @@ watch(
 
 let timer: number | undefined
 let tick: number | undefined
+// One poll at a time; a refresh asked for mid-poll runs right after it.
+let polling = false
+let again = false
 async function poll() {
+  if (polling) {
+    again = true
+    return
+  }
+  polling = true
+  clearTimeout(timer)
   try {
     game.value = await api.game()
   } catch {
     game.value = null
+  } finally {
+    polling = false
+  }
+  if (again) {
+    again = false
+    void poll()
+    return
   }
   timer = window.setTimeout(poll, game.value?.inGame ? 1000 : 3000)
 }
@@ -124,6 +160,7 @@ onMounted(() => {
     infoUntil.value = Date.now() + 6000
     setTimeout(() => (flash.value = ''), 6000)
   })
+  window.ezlol?.overlay?.onRefresh(() => void poll())
   window.ezlol?.overlay?.onPreview(() => {
     preview.value = true
     clearTimeout(previewTimer)
@@ -160,13 +197,16 @@ onUnmounted(() => {
           <div v-for="(r, j) in c.reasons.slice(1, 3)" :key="j" class="why" :class="{ warn: r.startsWith('注意') || r.startsWith('和你现在的装备不太搭') }">{{ r }}</div>
         </div>
       </div>
-      <div class="foot">选完按 {{ pretty(hotkeys.pick1) }} / 2 / 3 标记实际选的第几个（不按默认记为推荐）· {{ pretty(hotkeys.toggle) }} 隐藏</div>
+      <div class="foot">选完按 {{ pickKeys }} 记下选的第几个（不按就记为推荐）· {{ pretty(hotkeys.scan) }} 重新识别 · {{ pretty(hotkeys.toggle) }} 隐藏</div>
     </template>
     <template v-else>
       <div v-if="flash" class="flash">{{ flash }}</div>
       <div v-if="problem" class="problem">{{ problem }}</div>
+      <div v-if="showDue && due && !flash" class="due">
+        {{ STAGE[due.stage] }}强化待选：打开选择界面后按 <b>{{ pretty(hotkeys.scan) }}</b> 立即识别<template v-if="g?.autoScan !== false">（不按也会自动识别，要等几秒）</template>
+      </div>
       <div v-if="lastPick" class="picked">
-        已记：{{ STAGE[lastPick.stage] }}「{{ lastPick.name }}」<span v-if="lastPick.assumed" class="muted">（按推荐；不对就按 {{ pretty(hotkeys.pick1) }}/2/3）</span>
+        已记：{{ STAGE[lastPick.stage] }}「{{ lastPick.name }}」<span v-if="lastPick.assumed" class="muted">（按推荐记的；不对就按 {{ pickKeys }}）</span>
       </div>
       <div v-if="plan?.plan.direction?.conflict" class="problem">注意：{{ plan.plan.direction.note }}</div>
       <div v-if="plan?.plan.next?.length" class="next">
@@ -175,7 +215,7 @@ onUnmounted(() => {
           <img v-if="x.item.image" :src="x.item.image" :alt="x.item.name" />{{ x.item.name }} <i>{{ pct(x.winRate) }}</i>
         </span>
       </div>
-      <div v-if="!lastPick && !problem && !flash" class="muted">ezlol 在后台；出现强化选择时会自动显示。</div>
+      <div v-if="!lastPick && !problem && !flash && !showDue" class="muted">ezlol 在后台；强化选择界面打开后按 {{ pretty(hotkeys.scan) }} 立即识别。</div>
     </template>
   </div>
 </template>
@@ -206,6 +246,8 @@ onUnmounted(() => {
 .flash { color: #f0d48a; font-weight: 700; margin-bottom: 4px; }
 .problem { color: #e84057; margin-bottom: 4px; }
 .picked { margin-bottom: 4px; }
+.due { color: #0ac8b9; margin-bottom: 4px; }
+.due b { color: #f0d48a; }
 .next { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
 .it { display: inline-flex; align-items: center; gap: 4px; }
 .it img { width: 22px; height: 22px; border: 1px solid #785a28; }

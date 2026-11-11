@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"os/exec"
@@ -39,23 +40,46 @@ type liveResponse struct {
 	OCR      string        `json:"ocr"`                // available | disabled | unavailable | error text
 	OCRLang  string        `json:"ocrLang"`            // language the OCR helper reads, e.g. zh-Hans-CN
 	Research *researchView `json:"research,omitempty"` // AI strategy card for this champion
+	AutoScan bool          `json:"autoScan"`           // false: augments are read only when the player presses the scan hotkey
 }
 
 // game reports your champion and level in the running game, plus the augment
 // offer currently on screen (if any), ranked best first.
 func (s *Server) game(w http.ResponseWriter, r *http.Request) {
-	gd, err := s.live.Get(r.Context())
+	resp, err := s.liveState(r.Context())
 	if err != nil {
 		writeErr(w, 502, err.Error())
 		return
 	}
-	s.noteInGame(gd != nil)
-	if gd == nil {
-		writeJSON(w, 200, liveResponse{InGame: false})
+	s.noteInGame(resp.InGame)
+	if !resp.InGame {
+		writeJSON(w, 200, resp)
 		return
 	}
+	resp.Offer, resp.OCR = s.detectOffer(r.Context(), resp)
+	resp.OCRLang = s.ocr.Lang()
+	resp.AutoScan = s.settings.Get().AutoScan
+	if resp.Me != nil && resp.Mode == "aram" {
+		if q := s.watcher.Status().QueueID; q != 450 && q != 100 {
+			resp.Research = s.research(resp.Me.Champion.ID, true)
+		}
+	}
+	resp.Picks = s.Picks()
+	writeJSON(w, 200, resp)
+}
+
+// liveState reads the running game from the live client API (InGame false
+// when there is none).
+func (s *Server) liveState(ctx context.Context) (*liveResponse, error) {
+	gd, err := s.live.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if gd == nil {
+		return &liveResponse{InGame: false}, nil
+	}
 	d := s.dd.Data()
-	resp := liveResponse{InGame: true, GameTime: gd.GameData.GameTime, MapID: gd.GameData.MapNumber, Patch: s.watcher.Status().Patch}
+	resp := &liveResponse{InGame: true, GameTime: gd.GameData.GameTime, MapID: gd.GameData.MapNumber, Patch: s.watcher.Status().Patch}
 	if resp.Patch == "" && d != nil {
 		resp.Patch = builds.ShortPatch(d.Version)
 	}
@@ -90,15 +114,7 @@ func (s *Server) game(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	resp.Offer, resp.OCR = s.detectOffer(r.Context(), &resp)
-	resp.OCRLang = s.ocr.Lang()
-	if resp.Me != nil && resp.Mode == "aram" {
-		if q := s.watcher.Status().QueueID; q != 450 && q != 100 {
-			resp.Research = s.research(resp.Me.Champion.ID, true)
-		}
-	}
-	resp.Picks = s.Picks()
-	writeJSON(w, 200, resp)
+	return resp, nil
 }
 
 // resolveChampion maps the live "rawChampionName" (game_character_displayname_KaiSa)

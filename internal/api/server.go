@@ -66,7 +66,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/game", s.game)
 	mux.HandleFunc("POST /api/game/pick", s.correctPick)
 	mux.HandleFunc("POST /api/game/pick-slot", s.pickSlot)
-	mux.HandleFunc("POST /api/game/ai-look", s.aiLook)
+	mux.HandleFunc("POST /api/game/scan", s.scanNow)
 	mux.HandleFunc("GET /api/ai/research", s.aiResearch)
 	mux.HandleFunc("GET /api/champions/{key}/augment-build", s.augmentBuild)
 	mux.HandleFunc("POST /api/logs/open", s.openLogs)

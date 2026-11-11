@@ -32,14 +32,69 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 // ---- Desktop settings: login item, tray, overlay, hotkeys ----
-const HOTKEY_DEFAULTS = { pick1: 'CommandOrControl+Shift+1', pick2: 'CommandOrControl+Shift+2', pick3: 'CommandOrControl+Shift+3', toggle: 'CommandOrControl+Shift+H', aiLook: 'CommandOrControl+Shift+A' }
+// Ctrl+Alt, not Ctrl+Shift: on Chinese Windows Ctrl+Shift switches the input
+// method / keyboard layout, so in game it could leave an IME on and swallow
+// skill keys. Ctrl+<digit> are League emotes, Alt+<digit> self-cast items.
+const HOTKEY_DEFAULTS = { scan: 'CommandOrControl+Alt+S', pick1: 'CommandOrControl+Alt+1', pick2: 'CommandOrControl+Alt+2', pick3: 'CommandOrControl+Alt+3', toggle: 'CommandOrControl+Alt+H' }
+// Defaults of earlier versions: saved settings still holding them move to the new ones.
+const OLD_HOTKEY_DEFAULTS = { pick1: 'CommandOrControl+Shift+1', pick2: 'CommandOrControl+Shift+2', pick3: 'CommandOrControl+Shift+3', toggle: 'CommandOrControl+Shift+H' }
 const OVERLAY_POSITIONS = ['bottom-left', 'top-left', 'left-middle', 'top-right', 'bottom-right']
 const APP_SETTINGS_DEFAULTS = { launchAtLogin: false, startInTray: false, overlay: true, overlayPos: 'bottom-left', hotkeys: HOTKEY_DEFAULTS }
 const appSettingsPath = () => path.join(app.getPath('userData'), 'app-settings.json')
+
+/**
+ * Checks a hotkey and returns it in canonical accelerator form, or null.
+ * Keys: A-Z, 0-9, F1-F24, num0-num9. Letters and digits need Ctrl or Alt (a
+ * bare key, or Shift+key, would be taken from normal typing everywhere);
+ * F-keys and numpad keys may be used alone. Windows reserves F12 for debuggers.
+ */
+function normalizeHotkey(raw) {
+  if (typeof raw !== 'string' || raw.length > 60) return null
+  const mac = process.platform === 'darwin'
+  const MODS = {
+    ctrl: mac ? 'Control' : 'CommandOrControl',
+    control: mac ? 'Control' : 'CommandOrControl',
+    commandorcontrol: 'CommandOrControl',
+    cmdorctrl: 'CommandOrControl',
+    command: 'CommandOrControl',
+    cmd: 'CommandOrControl',
+    alt: 'Alt',
+    option: 'Alt',
+    shift: 'Shift',
+  }
+  const parts = raw.split('+').map((p) => p.trim()).filter(Boolean)
+  const mods = new Set()
+  let key = null
+  for (const p of parts) {
+    const m = MODS[p.toLowerCase()]
+    if (m) mods.add(m)
+    else if (key) return null
+    else key = p
+  }
+  if (!key) return null
+  let k = null
+  if (/^[a-z]$/i.test(key)) k = key.toUpperCase()
+  else if (/^[0-9]$/.test(key)) k = key
+  else if (/^f([1-9]|1[0-9]|2[0-4])$/i.test(key)) k = key.toUpperCase()
+  else if (/^num[0-9]$/i.test(key)) k = key.toLowerCase()
+  if (!k) return null
+  const standalone = /^F\d+$/.test(k) || /^num\d$/.test(k)
+  if (!standalone && !mods.has('CommandOrControl') && !mods.has('Control') && !mods.has('Alt')) return null
+  if (k === 'F12' && process.platform === 'win32') return null
+  return [...['CommandOrControl', 'Control', 'Alt', 'Shift'].filter((m) => mods.has(m)), k].join('+')
+}
+
 function loadAppSettings() {
   try {
     const saved = JSON.parse(fs.readFileSync(appSettingsPath(), 'utf8'))
-    return { ...APP_SETTINGS_DEFAULTS, ...saved, hotkeys: { ...HOTKEY_DEFAULTS, ...(saved.hotkeys || {}) } }
+    const hk = { ...HOTKEY_DEFAULTS }
+    for (const k of Object.keys(HOTKEY_DEFAULTS)) {
+      const v = saved.hotkeys && saved.hotkeys[k]
+      if (!v || v === OLD_HOTKEY_DEFAULTS[k]) continue
+      const n = normalizeHotkey(v)
+      if (n) hk[k] = n
+    }
+    return { ...APP_SETTINGS_DEFAULTS, ...saved, hotkeys: hk }
   } catch {
     return { ...APP_SETTINGS_DEFAULTS, hotkeys: { ...HOTKEY_DEFAULTS } }
   }
@@ -128,7 +183,15 @@ function setAppSettings(patch) {
     const hk = { ...appSettings.hotkeys }
     for (const k of Object.keys(HOTKEY_DEFAULTS)) {
       const v = patch.hotkeys[k]
-      if (typeof v === 'string' && /^[A-Za-z0-9+]{1,40}$/.test(v)) hk[k] = v
+      if (v === undefined || v === hk[k]) continue
+      const n = normalizeHotkey(v)
+      if (!n) throw new Error(`「${v}」不能用作快捷键：字母和数字要配 Ctrl 或 Alt，F1–F11 和小键盘数字可以单独用`)
+      hk[k] = n
+    }
+    const seen = {}
+    for (const [k, v] of Object.entries(hk)) {
+      if (seen[v]) throw new Error(`${v.replace('CommandOrControl', 'Ctrl')} 已经用在别的功能上了`)
+      seen[v] = k
     }
     clean.hotkeys = hk
   }
@@ -262,7 +325,7 @@ function flashOverlay(text) {
 }
 
 // ---- Global hotkeys (work while the game has focus, even fullscreen) ----
-function postJSON(pathname, body) {
+function postJSON(pathname, body, timeoutMs = 3000) {
   return new Promise((resolve) => {
     const data = JSON.stringify(body)
     const req = http.request(`${URL}${pathname}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } }, (res) => {
@@ -278,22 +341,44 @@ function postJSON(pathname, body) {
       })
     })
     req.on('error', (err) => resolve({ status: 0, body: { error: String(err.message || err) } }))
-    req.setTimeout(3000, () => req.destroy())
+    req.setTimeout(timeoutMs, () => req.destroy())
     req.end(data)
   })
 }
 
-async function pickSlot(n) {
-  const r = await postJSON('/api/game/pick-slot', { slot: n })
-  if (r.status === 200) flashOverlay(`已标记：第 ${n} 个「${r.body.augment || ''}」`)
-  else flashOverlay(r.body.error || '标记失败')
-  if (overlayMode === 'hidden') overlayMode = 'auto'
+function refreshOverlay() {
+  if (overlayWin) overlayWin.webContents.send('overlay:refresh')
+  if (win) win.webContents.send('game:refresh')
 }
 
-async function aiLook() {
-  flashOverlay('AI 正在根据识别出的文字分析强化…')
-  const r = await postJSON('/api/game/ai-look', {})
-  if (r.status !== 200) flashOverlay(r.body.error || 'AI 分析失败')
+async function pickSlot(n) {
+  if (overlayMode === 'hidden') overlayMode = 'auto'
+  const r = await postJSON('/api/game/pick-slot', { slot: n })
+  if (r.status === 200) flashOverlay(`已记录：选了第 ${n} 个「${r.body.augment || ''}」`)
+  else flashOverlay(r.body.error || '标记失败')
+  refreshOverlay()
+}
+
+// The player says the augment choice is open: capture and read it right now.
+let scanning = false
+async function scanNow() {
+  if (scanning) return
+  scanning = true
+  if (overlayMode === 'hidden') {
+    overlayMode = 'auto'
+    if (overlayWin) overlayWin.webContents.send('overlay:mode', overlayMode)
+  }
+  flashOverlay('正在截屏识别强化…')
+  try {
+    // The first scan of a session also starts the OCR helper: allow it time.
+    const r = await postJSON('/api/game/scan', {}, 20000)
+    if (r.status === 200) flashOverlay(`识别到：${(r.body.names || []).join(' / ')}，推荐「${r.body.best || ''}」`)
+    else if (r.status === 202) flashOverlay(r.body.message || 'AI 正在推断…')
+    else flashOverlay(r.body.error || '识别失败')
+  } finally {
+    scanning = false
+    refreshOverlay()
+  }
 }
 
 function toggleOverlay() {
@@ -303,10 +388,14 @@ function toggleOverlay() {
   updateOverlay()
 }
 
+let hotkeysSuspended = false
+let resumeTimer = null
 function registerHotkeys() {
   globalShortcut.unregisterAll()
   hotkeyErrors = []
   const hk = appSettings.hotkeys
+  if (overlayWin) overlayWin.webContents.send('overlay:hotkeys', hk)
+  if (hotkeysSuspended) return
   const reg = (acc, fn) => {
     try {
       if (!globalShortcut.register(acc, fn)) hotkeyErrors.push(acc)
@@ -314,13 +403,31 @@ function registerHotkeys() {
       hotkeyErrors.push(acc)
     }
   }
+  reg(hk.scan, scanNow)
   reg(hk.pick1, () => pickSlot(1))
   reg(hk.pick2, () => pickSlot(2))
   reg(hk.pick3, () => pickSlot(3))
   reg(hk.toggle, toggleOverlay)
-  reg(hk.aiLook, aiLook)
-  if (overlayWin) overlayWin.webContents.send('overlay:hotkeys', hk)
 }
+// While a new hotkey is being recorded in Settings, the global ones are let
+// go: otherwise pressing a combination that is already registered would be
+// taken by the hotkey and never reach the recorder.
+function suspendHotkeys(on) {
+  clearTimeout(resumeTimer)
+  if (hotkeysSuspended === on) return
+  hotkeysSuspended = on
+  if (on) {
+    globalShortcut.unregisterAll()
+    resumeTimer = setTimeout(() => suspendHotkeys(false), 30000)
+  } else {
+    registerHotkeys()
+  }
+}
+ipcMain.handle('hotkeys:suspend', (_e, on) => {
+  suspendHotkeys(!!on)
+  return appSettingsView()
+})
+ipcMain.handle('hotkeys:defaults', () => setAppSettings({ hotkeys: HOTKEY_DEFAULTS }))
 ipcMain.handle('app-settings:set', (_e, patch) => setAppSettings(patch))
 
 const BIN = process.platform === 'win32' ? 'ezlol.exe' : 'ezlol'
@@ -413,6 +520,7 @@ function createWindow(show = true) {
       shell.openExternal(url)
     }
   })
+  win.on('blur', () => suspendHotkeys(false))
   // Tray mode: the close button hides the window and ezlol keeps accepting queues.
   win.on('close', (e) => {
     if (appSettings.startInTray && !app.isQuitting) {

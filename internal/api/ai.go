@@ -494,20 +494,3 @@ func (s *Server) startTextRead(lines []screen.Line, names map[string]int, why st
 	}()
 	return true
 }
-
-// aiLook: POST /api/game/ai-look — the hotkey "let the AI work out the cards now".
-func (s *Server) aiLook(w http.ResponseWriter, r *http.Request) {
-	if !s.ai.Ready() {
-		writeErr(w, 400, "还没有填 DeepSeek API key")
-		return
-	}
-	st := &s.offer
-	st.mu.Lock()
-	started := len(st.lastOCR) > 0 && s.startTextRead(st.lastOCR, st.lastNames, "hotkey")
-	st.mu.Unlock()
-	if !started {
-		writeErr(w, 409, "现在没法分析：画面中间没读到强化卡片的文字，或者上一次还没分析完")
-		return
-	}
-	writeJSON(w, 200, map[string]any{"started": true})
-}

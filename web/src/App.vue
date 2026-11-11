@@ -95,19 +95,36 @@ function onStatus(s: Status) {
 // In-game poll: your champion (the build follows it) and the augment offer.
 // Fast while a game runs, slow otherwise; the endpoint is local and cheap.
 let gameTimer: number | undefined
+let polling = false
+let again = false
 async function pollGame() {
+  if (polling) {
+    again = true
+    return
+  }
+  polling = true
+  clearTimeout(gameTimer)
   try {
     game.value = await api.game()
   } catch {
     game.value = null
+  } finally {
+    polling = false
   }
   const me = game.value?.me?.champion
   if (followPick.value && me?.id && selected.value?.id !== me.id) {
     const c = champions.value.find((x) => x.id === me.id)
     if (c) selected.value = c
   }
+  if (again) {
+    again = false
+    void pollGame()
+    return
+  }
   gameTimer = window.setTimeout(pollGame, game.value?.inGame ? 1500 : 4000)
 }
+// A hotkey (scan, pick) changed the game state: show it now.
+window.ezlol?.onGameRefresh?.(() => void pollGame())
 
 onMounted(async () => {
   try {
@@ -216,7 +233,7 @@ function select(c: Champion) {
     <div class="layout" :class="mode">
       <div ref="mainEl" :key="modeKey + ':' + layoutVersion" class="main grid-stack" :class="[mode, { editing }]">
         <!-- In game (ARAM / Arena): the augment assistant first, build boxes after it -->
-        <AugmentAssist v-if="mode === 'game'" :game="game" @picks="(p) => game && (game.picks = p)" />
+        <AugmentAssist v-if="mode === 'game'" :game="game" @picks="(p) => game && (game.picks = p)" @refresh="pollGame" />
         <AugmentBuild :game="game" />
         <BuildPanel :compact="mode === 'game'" />
         <StrategyCard :game="game" :champion="selected" />

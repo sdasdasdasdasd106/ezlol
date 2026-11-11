@@ -26,6 +26,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		OCR         *bool   `json:"ocr"`
+		AutoScan    *bool   `json:"autoScan"`
 		UpdateCheck *bool   `json:"updateCheck"`
 		TestLog     *bool   `json:"testLog"`
 		LogShots    *bool   `json:"logShots"`
@@ -43,6 +44,9 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	err := s.settings.Update(func(st *settings.Settings) {
 		if body.OCR != nil {
 			st.OCR = *body.OCR
+		}
+		if body.AutoScan != nil {
+			st.AutoScan = *body.AutoScan
 		}
 		if body.UpdateCheck != nil {
 			st.UpdateCheck = *body.UpdateCheck
