@@ -22,3 +22,16 @@ func TestStoreRoundTrip(t *testing.T) {
 		t.Fatalf("view: %v", m)
 	}
 }
+
+func TestTokenNeverEchoed(t *testing.T) {
+	s := Settings{GitHubToken: "github_pat_secret1234"}
+	m := s.Masked()
+	for _, v := range m {
+		if str, ok := v.(string); ok && str == s.GitHubToken {
+			t.Fatal("raw token in the settings view")
+		}
+	}
+	if m["githubTokenSet"] != true || m["githubTokenHint"] != "••••1234" {
+		t.Fatalf("view: %v", m)
+	}
+}

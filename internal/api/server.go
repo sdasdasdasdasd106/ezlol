@@ -39,14 +39,16 @@ type Server struct {
 	info      infoCache
 	ocr       *screen.Reader
 	tlog      *testlog.Logger
+	repo      string // owner/name of this build's GitHub repository (log uploads)
+	upload    uploadState
 	offer     offerState
 	ui        fs.FS  // built frontend, may be nil in dev
 	devProxy  string // vite dev server url, may be empty
 }
 
 // New wires a server.
-func New(log *slog.Logger, w *watcher.Watcher, dd *ddragon.Store, community *builds.Community, cfg *settings.Store, upd *update.Checker, tlog *testlog.Logger, version string, ui fs.FS, devProxy string) *Server {
-	return &Server{log: log, watcher: w, dd: dd, community: community, settings: cfg, update: upd, tlog: tlog, version: version, live: live.New(), ocr: screen.New(), ui: ui, devProxy: devProxy}
+func New(log *slog.Logger, w *watcher.Watcher, dd *ddragon.Store, community *builds.Community, cfg *settings.Store, upd *update.Checker, tlog *testlog.Logger, repo, version string, ui fs.FS, devProxy string) *Server {
+	return &Server{log: log, watcher: w, dd: dd, community: community, repo: repo, settings: cfg, update: upd, tlog: tlog, version: version, live: live.New(), ocr: screen.New(), ui: ui, devProxy: devProxy}
 }
 
 // Handler builds the router.
@@ -61,6 +63,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/game/pick-slot", s.pickSlot)
 	mux.HandleFunc("GET /api/champions/{key}/augment-build", s.augmentBuild)
 	mux.HandleFunc("POST /api/logs/open", s.openLogs)
+	mux.HandleFunc("POST /api/logs/upload", s.uploadLogs)
 	mux.HandleFunc("GET /api/me/{id}", s.meChampion)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)

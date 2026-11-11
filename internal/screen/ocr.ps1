@@ -5,7 +5,7 @@
 # with x/y/w normalised to the game window (0..1, top-left origin).
 # Commands (one per line, tab separated):
 #   scan[<TAB>shot.png[<TAB>note]]  capture with GDI; optionally save the image
-#   file<TAB>img.png<TAB>cx<TAB>cy<TAB>fullW<TAB>fullH<TAB>capture
+#   b64<TAB>cx<TAB>cy<TAB>fullW<TAB>fullH<TAB>capture<TAB>base64-png
 #        OCR an image ezlol captured itself (Desktop Duplication); cx/cy is its
 #        offset inside the game window, fullW x fullH the window size.
 # Errors are reported as {"error":"..."}. "quit" or end of input exits.
@@ -16,6 +16,7 @@ $ProgressPreference = 'SilentlyContinue'
 $utf8 = New-Object System.Text.UTF8Encoding $false
 $stdout = New-Object System.IO.StreamWriter ([Console]::OpenStandardOutput()), $utf8
 $stdout.AutoFlush = $true
+try { [Console]::InputEncoding = $utf8 } catch { }
 function Emit($obj) { $stdout.WriteLine(($obj | ConvertTo-Json -Compress -Depth 5)) }
 
 try {
@@ -78,7 +79,7 @@ function Get-GameRect {
             if ($w -gt 300 -and $hgt -gt 200) { return New-Object System.Drawing.Rectangle $r.Left, $r.Top, $w, $hgt }
         }
     }
-    return [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    return $null
 }
 
 # Rough black-frame check: exclusive fullscreen can give a capture that is
@@ -160,6 +161,9 @@ function Read-Bitmap($bmp, [double]$cx, [double]$cy, [double]$fullW, [double]$fu
 # "scan": capture the game window with GDI (CopyFromScreen) and OCR it.
 function Scan([string]$dump, [string]$note) {
     $full = Get-GameRect
+    # Never capture the whole screen: without the game window there is only
+    # other programs (ezlol itself included) to misread.
+    if ($null -eq $full) { return @{ error = 'game window not found' } }
     # Augment cards sit in the middle of the screen: crop to that band (less to
     # read, no chat box), then map positions back to the full window.
     $cx = [int]($full.Width * 0.08); $cy = [int]($full.Height * 0.12)
@@ -183,12 +187,16 @@ function Scan([string]$dump, [string]$note) {
     return @{ width = $full.Width; height = $full.Height; lang = $langTag; capture = $capture; lines = $lines }
 }
 
-# "file": OCR a frame ezlol already captured (Desktop Duplication) and cropped.
-function Scan-File([string]$path, [double]$cx, [double]$cy, [double]$fullW, [double]$fullH, [string]$capture) {
-    $bmp = New-Object System.Drawing.Bitmap $path
+# "b64": OCR a frame ezlol already captured (Desktop Duplication) and cropped,
+# sent inline as base64 PNG (no file paths: they may contain non-ASCII
+# characters, e.g. a Chinese user name, which do not survive stdin).
+function Scan-B64([string]$b64, [double]$cx, [double]$cy, [double]$fullW, [double]$fullH, [string]$capture) {
+    $bytes = [Convert]::FromBase64String($b64)
+    $ms = New-Object System.IO.MemoryStream (, $bytes)
+    $bmp = New-Object System.Drawing.Bitmap $ms
     try {
         $lines = Read-Bitmap $bmp $cx $cy $fullW $fullH
-    } finally { $bmp.Dispose() }
+    } finally { $bmp.Dispose(); $ms.Dispose() }
     return @{ width = $fullW; height = $fullH; lang = $langTag; capture = $capture; lines = $lines }
 }
 
@@ -198,8 +206,8 @@ while ($true) {
     if ($null -eq $cmd -or $cmd -eq 'quit') { break }
     $parts = $cmd.Split("`t")
     try {
-        if ($parts[0] -eq 'file' -and $parts.Count -ge 7) {
-            Emit (Scan-File $parts[1] ([double]$parts[2]) ([double]$parts[3]) ([double]$parts[4]) ([double]$parts[5]) $parts[6])
+        if ($parts[0] -eq 'b64' -and $parts.Count -ge 7) {
+            Emit (Scan-B64 $parts[6] ([double]$parts[1]) ([double]$parts[2]) ([double]$parts[3]) ([double]$parts[4]) $parts[5])
         } else {
             $dump = ''; $note = ''
             if ($parts.Count -ge 2) { $dump = $parts[1] }

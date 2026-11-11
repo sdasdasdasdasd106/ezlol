@@ -1,11 +1,6 @@
 package screen
 
-import (
-	"bufio"
-	"image"
-	"image/png"
-	"os"
-)
+import "image"
 
 // IsBlack reports whether a frame is (nearly) all black, which is what a
 // screen capture of an exclusive-fullscreen game often looks like.
@@ -36,22 +31,4 @@ func OfferBand(img *image.RGBA) (*image.RGBA, int, int) {
 	cx, cy := b.Dx()*8/100, b.Dy()*12/100
 	r := image.Rect(b.Min.X+cx, b.Min.Y+cy, b.Min.X+cx+b.Dx()*84/100, b.Min.Y+cy+b.Dy()*78/100)
 	return img.SubImage(r).(*image.RGBA), cx, cy
-}
-
-func writePNG(path string, img image.Image) error {
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	w := bufio.NewWriter(f)
-	enc := png.Encoder{CompressionLevel: png.BestSpeed}
-	if err := enc.Encode(w, img); err != nil {
-		f.Close()
-		return err
-	}
-	if err := w.Flush(); err != nil {
-		f.Close()
-		return err
-	}
-	return f.Close()
 }

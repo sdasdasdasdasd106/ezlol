@@ -390,6 +390,10 @@ function createWindow(show = true) {
       sandbox: true,
     },
   })
+  // Invisible to screen capture (shows as black there): the augment reader
+  // captures the screen, and this window lists augment names that would
+  // otherwise be read as an augment choice whenever it is in front of the game.
+  win.setContentProtection(true)
   win.loadURL(URL)
   // Open external links (Riot dev portal etc.) in the system browser, never inside the app.
   win.webContents.setWindowOpenHandler(({ url }) => {

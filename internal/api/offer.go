@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -47,7 +48,8 @@ type augPick struct {
 // augmentOffer is the current augment selection screen, when detected.
 type augmentOffer struct {
 	Active    bool        `json:"active"`
-	Pending   bool        `json:"pending"` // a pick is due (level threshold crossed) but not yet seen on screen
+	Pending   bool        `json:"pending"`           // a pick is due (level threshold crossed) but not yet seen on screen
+	Waiting   bool        `json:"waiting,omitempty"` // loading screen: the game has not started yet
 	Level     int         `json:"level"`
 	Stage     int         `json:"stage"`            // 1..4 = game start, level 7, 11, 15
 	Offered   []offerCard `json:"offered"`          // best first
@@ -74,17 +76,21 @@ func stageOf(level int) int {
 }
 
 type offerState struct {
-	mu        sync.Mutex
-	seenLevel map[int]bool // levels whose pick has been completed (offer seen then gone)
-	pending   int          // level with a pick outstanding, 0 = none
-	pendingAt time.Time
-	last      *augmentOffer
-	lastScan  time.Time
-	lastGT    float64
-	lastLines []string
-	picks     []augPick
-	champ     int
-	chosen    int // slot marked with a hotkey while the current offer is up
+	mu         sync.Mutex
+	seenLevel  map[int]bool // levels whose pick has been completed (offer seen then gone)
+	pending    int          // level with a pick outstanding, 0 = none
+	pendingAt  time.Time
+	last       *augmentOffer
+	lastScan   time.Time
+	lastGT     float64
+	lastLines  []string
+	picks      []augPick
+	champ      int
+	chosen     int    // slot marked with a hotkey while the current offer is up
+	cand       string // augment ids of the last scan's possible offer
+	candN      int    // how many scans in a row read that same offer
+	emptyN     int    // scans in a row that read almost no text
+	lastStatus string // OCR status of the last scan, shown while waiting
 }
 
 var styleName = map[string]string{"crit": "暴击流", "on_hit": "攻速特效流", "ap": "法强流", "hybrid": "混伤流", "lethality": "穿甲流", "tank": "坦克流", "bruiser": "战士流", "ad": "物理流"}
@@ -103,8 +109,17 @@ func (s *Server) Picks() []augPick {
 	return append([]augPick{}, s.offer.picks...)
 }
 
-// detectOffer decides whether an augment pick is likely on screen and, if so,
-// OCRs the display to identify the offered augments and rank them.
+// detectOffer decides whether an augment pick is due and, if so, OCRs the
+// game window to identify the offered augments and rank them.
+//
+// Rules learned from real games:
+//   - Only scan once the game has really started (the live API answers during
+//     the loading screen too, whose text can look like augment names).
+//   - An offer counts only after two scans in a row read the same augments, so
+//     a single misread (loading screen, chat, ezlol's own window) is ignored.
+//   - A pick is recorded only for a confirmed offer that then closed.
+//   - While a pick is due, keep scanning until it is seen: every 1.5 s for the
+//     first minute (and while dead), then every 3 s.
 func (s *Server) detectOffer(ctx context.Context, live *liveResponse) (*augmentOffer, string) {
 	st := &s.offer
 	st.mu.Lock()
@@ -126,17 +141,28 @@ func (s *Server) detectOffer(ctx context.Context, live *liveResponse) (*augmentO
 	if q := s.watcher.Status().QueueID; q == 450 || q == 100 {
 		return nil, "available"
 	}
-	// New game: reset.
-	fresh := live.GameTime < st.lastGT-30 || st.seenLevel == nil || st.champ != me.Champion.ID
+	// New game: the clock went back, or nothing is known yet. (Not a champion
+	// change alone: Gnar, Kayn & co. change form mid-game.)
+	fresh := st.seenLevel == nil || live.GameTime < st.lastGT-30
 	if fresh {
 		st.seenLevel = map[int]bool{}
 		st.pending = 0
 		st.last = nil
 		st.picks = nil
-		st.champ = me.Champion.ID
-		s.tlog.Log("game", map[string]any{"champion": me.Champion.Name, "championId": me.Champion.ID, "gameTime": live.GameTime, "level": me.Level})
+		st.champ = 0
+		st.cand, st.candN = "", 0
+		st.chosen = 0
+		s.tlog.Log("game", map[string]any{"champion": me.Champion.Name, "championId": me.Champion.ID, "gameTime": live.GameTime, "level": me.Level, "started": live.Started})
 	}
 	st.lastGT = live.GameTime
+	if me.Champion.ID != 0 {
+		st.champ = me.Champion.ID
+	} else if st.champ != 0 {
+		me.Champion.ID = st.champ // transformed form we could not resolve
+	}
+	if !live.Started || live.GameTime < 1 {
+		return &augmentOffer{Waiting: true}, "available"
+	}
 	// Joined mid-game: picks below the current level already happened.
 	if fresh && live.GameTime > 120 {
 		for _, lv := range pickLevels {
@@ -150,6 +176,7 @@ func (s *Server) detectOffer(ctx context.Context, live *liveResponse) (*augmentO
 		for _, lv := range pickLevels {
 			if me.Level >= lv && !st.seenLevel[lv] {
 				st.pending, st.pendingAt = lv, time.Now()
+				st.cand, st.candN = "", 0
 				break
 			}
 		}
@@ -158,14 +185,16 @@ func (s *Server) detectOffer(ctx context.Context, live *liveResponse) (*augmentO
 		return nil, "available"
 	}
 	stage := stageOf(st.pending)
-	// Picks are only shown while dead or at the fountain; scanning while alive
-	// mid-fight wastes CPU, but early game and right after level-up we scan anyway.
-	shouldScan := me.IsDead || live.GameTime < 120 || time.Since(st.pendingAt) < 45*time.Second || (st.last != nil && st.last.Active)
-	if !shouldScan || time.Since(st.lastScan) < 1500*time.Millisecond {
-		if st.last != nil && st.last.Active && time.Since(st.lastScan) < 6*time.Second {
+	active := st.last != nil && st.last.Active
+	interval := 3 * time.Second
+	if active || me.IsDead || time.Since(st.pendingAt) < time.Minute {
+		interval = 1500 * time.Millisecond
+	}
+	if time.Since(st.lastScan) < interval {
+		if active {
 			return st.last, "available"
 		}
-		return &augmentOffer{Pending: true, Level: st.pending, Stage: stage, Lines: st.lastLines}, "available"
+		return &augmentOffer{Pending: true, Level: st.pending, Stage: stage, Lines: st.lastLines}, st.lastStatus
 	}
 	st.lastScan = time.Now()
 	augs, _, err := s.community.Augments(ctx, live.Patch, me.Champion.ID)
@@ -192,18 +221,36 @@ func (s *Server) detectOffer(ctx context.Context, live *liveResponse) (*augmentO
 	if len(byID) == 0 {
 		return &augmentOffer{Pending: true, Level: st.pending, Stage: stage}, "强化数据加载失败"
 	}
+	// Augments without statistics for this champion can still be offered.
+	var rest []int
+	for _, id := range s.community.AllAugmentIDs(ctx, live.Patch) {
+		if _, ok := byID[id]; !ok {
+			rest = append(rest, id)
+		}
+	}
 	cands := map[string]string{}
-	for _, a := range byID {
+	for id, a := range s.community.AugmentInfo(ctx, live.Patch, rest) {
+		byID[id] = a
 		addCandidates(cands, a)
 	}
+	// Names shared by two ids (Arena and Mayhem versions): the one with
+	// statistics for this champion wins, so it is added last.
+	for id, a := range byID {
+		if !slices.Contains(rest, id) {
+			addCandidates(cands, a)
+		}
+	}
 
-	activeBefore := st.last != nil && st.last.Active
 	shot := s.tlog.ShotPath(fmt.Sprintf("lv%d", st.pending), false)
 	t0 := time.Now()
 	lines, err := s.ocr.ReadDump(ctx, shot)
 	if err != nil {
-		s.tlog.Log("scan", map[string]any{"mode": "aram", "level": st.pending, "stage": stage, "error": err.Error(), "capture": s.ocr.Capture(), "ms": time.Since(t0).Milliseconds()})
-		return &augmentOffer{Pending: true, Level: st.pending, Stage: stage}, err.Error()
+		s.tlog.Log("scan", map[string]any{"mode": "aram", "level": st.pending, "stage": stage, "error": err.Error(), "capture": s.ocr.Capture(), "ms": time.Since(t0).Milliseconds(), "gameTime": live.GameTime})
+		st.lastStatus = err.Error()
+		if active {
+			return st.last, st.lastStatus // keep showing the offer through a failed scan
+		}
+		return &augmentOffer{Pending: true, Level: st.pending, Stage: stage}, st.lastStatus
 	}
 	var diag []string
 	for _, l := range lines {
@@ -212,35 +259,65 @@ func (s *Server) detectOffer(ctx context.Context, live *liveResponse) (*augmentO
 		}
 	}
 	st.lastLines = diag
+	// Nearly no text in the game window several times in a row: the capture is
+	// probably not showing the game (e.g. exclusive fullscreen).
+	if len(lines) < 3 {
+		st.emptyN++
+	} else {
+		st.emptyN = 0
+	}
+	st.lastStatus = "available"
+	if st.emptyN >= 6 {
+		st.lastStatus = "截屏几乎读不到文字，可能没截到游戏画面（全屏下请检查「全屏优化」，或改用无边框）"
+	}
 	keys := screen.OfferLayout(screen.Match(lines, cands))
+	// A real offer shows 3 cards (4 at most if one is being rerolled); more is a list of names, not a choice.
+	if len(keys) > 4 {
+		keys = nil
+	}
+	ids := make([]int, 0, len(keys))
 	matched := make([]string, 0, len(keys))
 	for _, k := range keys {
 		id, _ := strconv.Atoi(k.Key)
+		ids = append(ids, id)
 		matched = append(matched, byID[id].Name)
 	}
-	s.tlog.Log("scan", map[string]any{"mode": "aram", "level": st.pending, "stage": stage, "dead": me.IsDead, "ms": time.Since(t0).Milliseconds(),
-		"lines": len(lines), "text": diag, "matched": matched, "shot": shot, "lang": s.ocr.Lang(), "capture": s.ocr.Capture()})
+	sig := fmt.Sprint(ids)
+	if len(keys) >= 2 && sig == st.cand {
+		st.candN++
+	} else if len(keys) >= 2 {
+		st.cand, st.candN = sig, 1
+	} else {
+		st.cand, st.candN = "", 0
+	}
+	confirmed := len(keys) >= 2 && (st.candN >= 2 || active)
+	s.tlog.Log("scan", map[string]any{"mode": "aram", "level": st.pending, "stage": stage, "dead": me.IsDead, "ms": time.Since(t0).Milliseconds(), "gameTime": live.GameTime,
+		"lines": len(lines), "text": diag, "matched": matched, "confirmed": confirmed, "shot": shot, "lang": s.ocr.Lang(), "capture": s.ocr.Capture()})
 
-	if len(keys) < 2 {
-		// Offer disappeared after being seen: the pick is done. Plan A: assume
-		// the recommended augment was taken; the player can correct it.
-		if activeBefore && time.Since(st.last.ScannedAt) > 4*time.Second {
+	if !confirmed {
+		// A confirmed offer that is gone (two scans without it): the pick is
+		// done. Plan A: record the hotkey-marked one, else the recommended one.
+		if active && len(keys) < 2 && time.Since(st.last.ScannedAt) > 3*time.Second {
 			s.recordPick(st.last, me.Champion.Name)
 			st.seenLevel[st.pending] = true
 			st.pending = 0
 			st.last = nil
-			return nil, "available"
+			st.cand, st.candN = "", 0
+			return nil, st.lastStatus
+		}
+		if active {
+			return st.last, st.lastStatus
 		}
 		// Give up waiting after a long time so the next threshold can arm.
 		if time.Since(st.pendingAt) > 8*time.Minute {
+			s.tlog.Log("pick-missed", map[string]any{"level": st.pending, "stage": stage})
 			st.seenLevel[st.pending] = true
 			st.pending = 0
 		}
-		return &augmentOffer{Pending: st.pending != 0, Level: st.pending, Stage: stage, Lines: st.lastLines}, "available"
+		return &augmentOffer{Pending: st.pending != 0, Level: st.pending, Stage: stage, Lines: st.lastLines}, st.lastStatus
 	}
 	var offered []builds.Augment
-	for _, k := range keys {
-		id, _ := strconv.Atoi(k.Key)
+	for _, id := range ids {
 		if a, ok := byID[id]; ok {
 			offered = append(offered, a)
 		}
@@ -268,7 +345,7 @@ func (s *Server) detectOffer(ctx context.Context, live *liveResponse) (*augmentO
 			}
 		}
 	}
-	if !activeBefore {
+	if !active {
 		st.chosen = 0
 		off.Chosen = 0
 		cards := make([]map[string]any, 0, len(off.Offered))
@@ -277,11 +354,11 @@ func (s *Server) detectOffer(ctx context.Context, live *liveResponse) (*augmentO
 				"lift": round4(c.Lift), "pairWinRate": c.PairWR, "pairWith": c.PairWith, "fit": round4(c.Fit), "fitOk": c.FitOK, "reasons": c.Reasons})
 		}
 		s.tlog.Log("offer", map[string]any{"level": off.Level, "stage": stage, "champion": me.Champion.Name, "items": me.Items, "picks": pickNames(st.picks),
-			"source": off.Source, "cards": cards, "best": off.Best, "note": off.Note})
+			"source": off.Source, "cards": cards, "best": off.Best, "note": off.Note, "shot": s.tlog.ShotPath("offer", true)})
 		s.log.Info("augment offer detected", "level", off.Level, "offered", len(off.Offered), "best", off.Best)
 	}
 	st.last = off
-	return off, "available"
+	return off, st.lastStatus
 }
 
 // recordPick stores the pick for a finished offer: the slot marked with a
@@ -472,7 +549,8 @@ func (s *Server) rankMayhem(ctx context.Context, me *livePlayer, stage int, offe
 	return cards, "aramkit"
 }
 
-// correctPick replaces the assumed augment of a stage with the one actually taken.
+// correctPick replaces the assumed augment of a stage with the one actually
+// taken, or removes the record when augmentId is 0.
 func (s *Server) correctPick(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Stage     int `json:"stage"`
@@ -490,6 +568,12 @@ func (s *Server) correctPick(w http.ResponseWriter, r *http.Request) {
 		if p.Stage != body.Stage {
 			continue
 		}
+		if body.AugmentID == 0 { // remove a wrong record
+			s.tlog.Log("pick-removed", map[string]any{"stage": p.Stage, "augment": p.Name})
+			st.picks = append(st.picks[:i], st.picks[i+1:]...)
+			writeJSON(w, 200, st.picks)
+			return
+		}
 		for _, a := range p.Offered {
 			if a.ID == body.AugmentID {
 				from := p.Name
@@ -505,9 +589,10 @@ func (s *Server) correctPick(w http.ResponseWriter, r *http.Request) {
 	writeErr(w, 404, "没有这一阶段的强化记录")
 }
 
-// addCandidates registers an augment's Chinese and English names for on-screen matching.
+// addCandidates registers an augment's names for on-screen matching: SEA
+// Simplified Chinese (what the client shows), China-server Chinese, English.
 func addCandidates(cands map[string]string, a builds.Augment) {
-	for _, name := range []string{a.Name, a.NameEN} {
+	for _, name := range []string{a.Name, a.NameCN, a.NameEN} {
 		if n := screen.Normalize(name); len(n) >= 4 {
 			cands[n] = strconv.Itoa(a.ID)
 		}

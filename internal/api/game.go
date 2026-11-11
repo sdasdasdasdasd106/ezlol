@@ -28,6 +28,7 @@ type livePlayer struct {
 type liveResponse struct {
 	InGame   bool          `json:"inGame"`
 	GameTime float64       `json:"gameTime"`
+	Started  bool          `json:"started"` // past the loading screen (GameStart event seen)
 	MapID    int           `json:"mapId"`
 	Mode     string        `json:"mode"` // aram | arena | sr
 	Me       *livePlayer   `json:"me,omitempty"`
@@ -47,6 +48,7 @@ func (s *Server) game(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 502, err.Error())
 		return
 	}
+	s.noteInGame(gd != nil)
 	if gd == nil {
 		writeJSON(w, 200, liveResponse{InGame: false})
 		return
@@ -81,6 +83,12 @@ func (s *Server) game(w http.ResponseWriter, r *http.Request) {
 			resp.Me = &me
 		}
 	}
+	for _, ev := range gd.Events.Events {
+		if ev.Name == "GameStart" {
+			resp.Started = true
+			break
+		}
+	}
 	resp.Offer, resp.OCR = s.detectOffer(r.Context(), &resp)
 	resp.OCRLang = s.ocr.Lang()
 	resp.Picks = s.Picks()
@@ -105,6 +113,17 @@ func resolveChampion(d *ddragon.Data, p live.Player) ddragon.Champion {
 	norm := strings.NewReplacer("'", "", " ", "", ".", "", "&", "").Replace(p.ChampionName)
 	if found, ok := d.ChampionByKey(norm); ok {
 		return found
+	}
+	// Transformed forms carry a suffix ("GnarBig"): take the longest champion
+	// key the raw name starts with.
+	var best ddragon.Champion
+	for _, ch := range d.Champions {
+		if len(ch.Key) > len(best.Key) && len(ch.Key) >= 3 && strings.HasPrefix(strings.ToLower(raw), strings.ToLower(ch.Key)) {
+			best = ch
+		}
+	}
+	if best.ID != 0 {
+		return best
 	}
 	for _, ch := range d.Champions {
 		if strings.EqualFold(ch.Name, p.ChampionName) {

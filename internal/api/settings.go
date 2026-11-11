@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/aarlint/ezlol/internal/settings"
@@ -14,6 +15,8 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	m["ocrAvailable"] = s.ocr.Available()
 	m["ocrLang"] = s.ocr.Lang()
 	m["logDir"] = s.tlog.Dir()
+	m["uploadRepo"] = s.repo
+	m["lastUpload"] = s.lastUpload()
 	m["version"] = s.version
 	writeJSON(w, 200, m)
 }
@@ -21,10 +24,12 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 // putSettings applies a partial update.
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		OCR         *bool `json:"ocr"`
-		UpdateCheck *bool `json:"updateCheck"`
-		TestLog     *bool `json:"testLog"`
-		LogShots    *bool `json:"logShots"`
+		OCR         *bool   `json:"ocr"`
+		UpdateCheck *bool   `json:"updateCheck"`
+		TestLog     *bool   `json:"testLog"`
+		LogShots    *bool   `json:"logShots"`
+		GitHubToken *string `json:"githubToken"`
+		AutoUpload  *bool   `json:"autoUpload"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
 		writeErr(w, 400, "请求格式不对")
@@ -42,6 +47,12 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.LogShots != nil {
 			st.LogShots = *body.LogShots
+		}
+		if body.GitHubToken != nil {
+			st.GitHubToken = strings.TrimSpace(*body.GitHubToken)
+		}
+		if body.AutoUpload != nil {
+			st.AutoUpload = *body.AutoUpload
 		}
 	})
 	if err != nil {

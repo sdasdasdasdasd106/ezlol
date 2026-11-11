@@ -19,9 +19,10 @@ import (
 
 const cdn = "https://ddragon.leagueoflegends.com"
 
-// locale is the Data Dragon language: champion, item, rune and spell names in
-// Simplified Chinese. Keys and ids stay the same in every language.
-const locale = "zh_CN"
+// locale is the Data Dragon language: champion and item names in the
+// Simplified Chinese of the SEA client (zh_MY, worded differently from the
+// China server's zh_CN). Keys and ids stay the same in every language.
+const locale = "zh_MY"
 
 // Champion is a trimmed champion record.
 type Champion struct {

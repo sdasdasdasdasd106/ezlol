@@ -38,6 +38,9 @@ type Reader struct {
 	capture string                                                 // how the last frame was captured: dda | gdi (why)
 }
 
+// ErrNoGame means the game window is not open (or minimized), so nothing was captured.
+var ErrNoGame = errors.New("没找到游戏窗口（还在加载、已最小化或已关闭）")
+
 // ErrBlack means the captured frame was black: the game is probably in
 // exclusive fullscreen and the screen cannot be read.
 var ErrBlack = errors.New("截到的是黑屏：这台电脑在全屏模式下截不到游戏画面，请检查「全屏优化」或改用无边框模式")

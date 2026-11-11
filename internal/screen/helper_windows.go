@@ -7,8 +7,11 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
 	"os"
 	"os/exec"
@@ -36,9 +39,9 @@ type psHelper struct {
 	lastErr  error
 	failedAt time.Time
 
-	dda     *ddaCapturer
-	ddaOff  bool // Desktop Duplication failed to start: GDI only
-	tmpPath string
+	dda      *ddaCapturer
+	ddaOff   bool // Desktop Duplication does not work here: GDI only
+	ddaFails int  // consecutive Desktop Duplication failures
 }
 
 func windowsHelper() func(ctx context.Context, dump string) ([]byte, error) {
@@ -69,7 +72,7 @@ func windowsHelper() func(ctx context.Context, dump string) ([]byte, error) {
 			}
 		}
 	}
-	h := &psHelper{exe: exe, script: script, dda: newDDA(), tmpPath: filepath.Join(filepath.Dir(script), "ezlol-frame.png")}
+	h := &psHelper{exe: exe, script: script, dda: newDDA()}
 	return h.scan
 }
 
@@ -165,11 +168,32 @@ func (h *psHelper) scan(ctx context.Context, dump string) ([]byte, error) {
 	if strings.ContainsAny(dump, "\t\r\n") {
 		dump = ""
 	}
-	// Desktop Duplication first (sees fullscreen games); GDI if it fails or
-	// gives a black frame.
-	cmd, note := h.ddaCommand(dump)
+	// Only ever capture the game window: if it is not there (minimized,
+	// loading, closed), there is nothing to read.
+	target, ok := gameRect()
+	if !ok {
+		return nil, ErrNoGame
+	}
+	// Desktop Duplication (sees fullscreen games). A transient failure
+	// (fullscreen switch, alt-tab) is retried on the next scan; GDI is only the
+	// fallback when Desktop Duplication does not work on this machine at all
+	// or keeps failing.
+	cmd, note := h.ddaCommand(target, dump)
 	if cmd == "" {
-		cmd = "scan\t" + dump + "\t" + note + "\n"
+		h.ddaFails++
+		if !h.ddaOff && h.ddaFails < 5 {
+			return nil, fmt.Errorf("截屏暂时失败，稍后重试（%s）", note)
+		}
+		gdiDump := dump
+		for _, r := range gdiDump {
+			if r > 127 { // the helper's stdin may not carry non-ASCII paths
+				gdiDump = ""
+				break
+			}
+		}
+		cmd = "scan\t" + gdiDump + "\t" + note + "\n"
+	} else {
+		h.ddaFails = 0
 	}
 	if _, err := io.WriteString(h.stdin, cmd); err != nil {
 		h.stop()
@@ -214,13 +238,13 @@ func (l *limited) String() string {
 }
 
 // ddaCommand captures the game window with Desktop Duplication, crops it to the
-// middle band where augment cards appear, saves it as PNG and returns the
-// helper command to OCR it. On failure it returns "" and why.
-func (h *psHelper) ddaCommand(dump string) (cmd, note string) {
+// middle band where augment cards appear and returns the helper command that
+// carries it (base64 PNG). The screenshot for the test log, if asked for, is
+// written here. On failure it returns "" and why.
+func (h *psHelper) ddaCommand(target image.Rectangle, dump string) (cmd, note string) {
 	if h.ddaOff {
 		return "", "dda-off"
 	}
-	target, _ := gameRect()
 	img, area, err := h.dda.capture(target, 3*time.Second)
 	if err != nil {
 		if strings.Contains(err.Error(), "d3d11 device") || strings.Contains(err.Error(), "no output") {
@@ -232,12 +256,13 @@ func (h *psHelper) ddaCommand(dump string) (cmd, note string) {
 		return "", "dda-black"
 	}
 	band, cx, cy := OfferBand(img)
-	path := dump
-	if path == "" {
-		path = h.tmpPath
+	var buf bytes.Buffer
+	enc := png.Encoder{CompressionLevel: png.BestSpeed}
+	if err := enc.Encode(&buf, band); err != nil {
+		return "", "dda-encode: " + err.Error()
 	}
-	if err := writePNG(path, band); err != nil {
-		return "", "dda-save: " + err.Error()
+	if dump != "" {
+		_ = os.WriteFile(dump, buf.Bytes(), 0o644)
 	}
-	return fmt.Sprintf("file\t%s\t%d\t%d\t%d\t%d\tdda\n", path, cx, cy, area.Dx(), area.Dy()), ""
+	return fmt.Sprintf("b64\t%d\t%d\t%d\t%d\tdda\t%s\n", cx, cy, area.Dx(), area.Dy(), base64.StdEncoding.EncodeToString(buf.Bytes())), ""
 }

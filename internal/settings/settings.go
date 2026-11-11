@@ -13,6 +13,9 @@ type Settings struct {
 	UpdateCheck bool `json:"updateCheck"` // look for new releases
 	TestLog     bool `json:"testLog"`     // write a local log of every augment scan and pick
 	LogShots    bool `json:"logShots"`    // also save screenshots of what was scanned
+	// Testing aid (remove with internal/logupload): upload logs to GitHub.
+	GitHubToken string `json:"githubToken"` // never logged or echoed back
+	AutoUpload  bool   `json:"autoUpload"`  // upload after every game
 }
 
 // Defaults returns the initial configuration.
@@ -63,5 +66,10 @@ func (st *Store) Update(fn func(s *Settings)) error {
 
 // Masked returns settings for the UI (nothing secret is stored any more).
 func (s Settings) Masked() map[string]any {
-	return map[string]any{"ocr": s.OCR, "updateCheck": s.UpdateCheck, "testLog": s.TestLog, "logShots": s.LogShots}
+	hint := ""
+	if n := len(s.GitHubToken); n > 4 {
+		hint = "••••" + s.GitHubToken[n-4:]
+	}
+	return map[string]any{"ocr": s.OCR, "updateCheck": s.UpdateCheck, "testLog": s.TestLog, "logShots": s.LogShots,
+		"githubTokenSet": s.GitHubToken != "", "githubTokenHint": hint, "autoUpload": s.AutoUpload}
 }

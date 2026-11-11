@@ -114,7 +114,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           api.New(log, w, dd, community, cfg, upd, tlog, version, ui, *dev).Handler(),
+		Handler:           api.New(log, w, dd, community, cfg, upd, tlog, repo, version, ui, *dev).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	ln, err := net.Listen("tcp", *addr)

@@ -88,6 +88,7 @@ export interface OfferCard extends Augment {
 export interface AugmentOffer {
   active: boolean
   pending: boolean
+  waiting?: boolean
   level: number
   stage: number
   offered: OfferCard[] | null
@@ -163,6 +164,12 @@ export interface SettingsView {
   testLog: boolean
   logShots: boolean
   logDir: string
+  // testing aid: log upload to GitHub
+  githubTokenSet: boolean
+  githubTokenHint: string
+  autoUpload: boolean
+  uploadRepo: string
+  lastUpload?: { at: string; why: string; uploaded: number; skipped: number; url: string; error?: string } | null
   version: string
 }
 export interface UpdateInfo {

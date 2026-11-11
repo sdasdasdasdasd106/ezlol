@@ -35,8 +35,13 @@ type Community struct {
 
 const cdragonBase = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/"
 
-// cdragonZH is the same game data with Simplified Chinese strings.
-const cdragonZH = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/zh_cn/"
+// cdragonSEA is the game data in the Simplified Chinese the SEA client uses
+// (zh_MY). Most augment names differ from the China server's zh_CN wording
+// (e.g. 返璞归真 vs 回归基本功), and the screen shows the SEA ones.
+const cdragonSEA = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/zh_my/"
+
+// cdragonCN is the China server's Simplified Chinese (zh_CN): extra names to match.
+const cdragonCN = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/zh_cn/"
 
 // blitzLocales: augment descriptions/names from blitz, Chinese first.
 var blitzLocales = []string{"zh_cn", "en_us"}
@@ -51,6 +56,7 @@ func NewCommunity(dir string) *Community {
 type Augment struct {
 	ID       int     `json:"id"`
 	Name     string  `json:"name"`             // Simplified Chinese when available
+	NameCN   string  `json:"nameCn,omitempty"` // China-server (zh_CN) name, also matched on screen
 	NameEN   string  `json:"nameEn,omitempty"` // English name, also matched on screen
 	Desc     string  `json:"desc"`
 	Rarity   string  `json:"rarity"` // prismatic | gold | silver | bronze
@@ -191,7 +197,8 @@ func (c *Community) opggBuild(ctx context.Context, d *ddragon.Data, champ ddrago
 // ---- augments ----
 
 type augmentMeta struct {
-	names   map[int]string // Chinese, falling back to English
+	names   map[int]string // SEA Simplified Chinese (zh_MY), falling back to zh_CN, then English
+	namesCN map[int]string
 	namesEN map[int]string
 	icons   map[int]string
 	rarity  map[int]string
@@ -205,7 +212,7 @@ func (c *Community) loadMeta(ctx context.Context, patch string) *augmentMeta {
 	if c.meta != nil && time.Since(c.meta.at) < 24*time.Hour {
 		return c.meta
 	}
-	m := &augmentMeta{names: map[int]string{}, namesEN: map[int]string{}, icons: map[int]string{}, rarity: map[int]string{}, descs: map[int]string{}, at: time.Now()}
+	m := &augmentMeta{names: map[int]string{}, namesCN: map[int]string{}, namesEN: map[int]string{}, icons: map[int]string{}, rarity: map[int]string{}, descs: map[int]string{}, at: time.Now()}
 	type cherryRow struct {
 		ID     int    `json:"id"`
 		Name   string `json:"nameTRA"`
@@ -225,12 +232,22 @@ func (c *Community) loadMeta(ctx context.Context, patch string) *augmentMeta {
 			}
 		}
 	}
-	if b, err := c.fetch(ctx, "cherry-augments.zh_cn.json", cdragonZH+"v1/cherry-augments.json", 24*time.Hour); err == nil {
+	for _, src := range []struct {
+		cache, url string
+		into       map[int]string
+	}{
+		{"cherry-augments.zh_my.json", cdragonSEA + "v1/cherry-augments.json", m.names},
+		{"cherry-augments.zh_cn.json", cdragonCN + "v1/cherry-augments.json", m.namesCN},
+	} {
+		b, err := c.fetch(ctx, src.cache, src.url, 24*time.Hour)
+		if err != nil {
+			continue
+		}
 		var rows []cherryRow
 		if json.Unmarshal(b, &rows) == nil {
 			for _, r := range rows {
 				if r.Name != "" {
-					m.names[r.ID] = r.Name
+					src.into[r.ID] = r.Name
 				}
 			}
 		}
@@ -258,7 +275,7 @@ func (m *augmentMeta) mergeBlitz(b []byte, loc string) {
 	if json.Unmarshal(b, &rows) != nil {
 		return
 	}
-	names := m.names
+	names := m.namesCN // blitz's Chinese is the China-server wording
 	if loc == "en_us" {
 		names = m.namesEN
 	}
@@ -273,11 +290,13 @@ func (m *augmentMeta) mergeBlitz(b []byte, loc string) {
 	}
 }
 
-// fillNames shows the English name where no Chinese one is known.
+// fillNames shows the zh_CN, then the English name where no SEA name is known.
 func (m *augmentMeta) fillNames() {
-	for id, en := range m.namesEN {
-		if m.names[id] == "" {
-			m.names[id] = en
+	for _, alt := range []map[int]string{m.namesCN, m.namesEN} {
+		for id, n := range alt {
+			if m.names[id] == "" {
+				m.names[id] = n
+			}
 		}
 	}
 }
@@ -365,7 +384,7 @@ func (c *Community) Augments(ctx context.Context, patch string, champID int) ([]
 	var out []Augment
 	for id, st := range stats {
 		games := atoi(st.NumGames)
-		a := Augment{ID: id, Name: meta.names[id], NameEN: meta.namesEN[id], Desc: meta.descs[id], Rarity: meta.rarity[id], Icon: meta.icons[id],
+		a := Augment{ID: id, Name: meta.names[id], NameCN: meta.namesCN[id], NameEN: meta.namesEN[id], Desc: meta.descs[id], Rarity: meta.rarity[id], Icon: meta.icons[id],
 			Tier: atoi(st.Tier), WinRate: atof(st.WinRate), PickRate: atof(st.PickRate), Games: games, Scope: scope}
 		if a.Name == "" {
 			a.Name = "强化 #" + strconv.Itoa(id)
@@ -474,7 +493,7 @@ func (c *Community) AugmentInfo(ctx context.Context, patch string, ids []int) ma
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, id := range ids {
-		a := Augment{ID: id, Name: m.names[id], NameEN: m.namesEN[id], Desc: m.descs[id], Rarity: m.rarity[id], Icon: m.icons[id]}
+		a := Augment{ID: id, Name: m.names[id], NameCN: m.namesCN[id], NameEN: m.namesEN[id], Desc: m.descs[id], Rarity: m.rarity[id], Icon: m.icons[id]}
 		if a.Name == "" {
 			a.Name = "强化 #" + strconv.Itoa(id)
 		}
@@ -484,4 +503,17 @@ func (c *Community) AugmentInfo(ctx context.Context, patch string, ids []int) ma
 		out[id] = a
 	}
 	return out
+}
+
+// AllAugmentIDs lists every augment the game data knows (Mayhem and Arena), so
+// an augment this champion has no statistics for is still recognised on screen.
+func (c *Community) AllAugmentIDs(ctx context.Context, patch string) []int {
+	m := c.loadMeta(ctx, patch)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ids := make([]int, 0, len(m.names))
+	for id := range m.names {
+		ids = append(ids, id)
+	}
+	return ids
 }

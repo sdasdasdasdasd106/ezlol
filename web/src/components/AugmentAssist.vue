@@ -49,6 +49,7 @@ const fixing = ref<number | null>(null)
 async function correct(p: AugPick, id: number) {
   fixing.value = null
   if (id === p.augmentId) return
+  if (id === 0 && !confirm(`删除「${STAGE[p.stage]} ${p.name}」这条记录？`)) return
   try {
     emit('picks', await api.correctPick(p.stage, id))
   } catch (e) {
@@ -122,6 +123,7 @@ watch(
           </div>
         </div>
       </div>
+      <div v-else-if="offer?.waiting" class="muted">还在加载画面，进入游戏后开始识别。</div>
       <div v-else-if="offer?.pending" class="wait">
         {{ offer.level <= 1 ? '开局' : `${offer.level} 级` }}的强化待选——打开选择界面后会自动识别。
       </div>
@@ -138,6 +140,7 @@ watch(
           <button class="sm" :title="p.assumed ? '这是按推荐自动记录的；选的不是它就点这里改' : '改成其他选项'" @click="fixing = fixing === p.stage ? null : p.stage">{{ p.assumed ? '不对？' : '改' }}</button>
           <span v-if="fixing === p.stage" class="fix">
             <button v-for="o in p.offered" :key="o.id" class="sm" :class="{ active: o.id === p.augmentId }" @click="correct(p, o.id)">{{ o.name }}</button>
+            <button class="sm danger" title="这条记录是错的（其实没选过）：删掉它" @click="correct(p, 0)">删除</button>
           </span>
         </span>
       </div>
