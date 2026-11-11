@@ -430,3 +430,62 @@ func (c *Community) AramkitAugments(ctx context.Context, patch string, champID i
 	})
 	return out, nil
 }
+
+// AKAugmentDetail is one augment across all champions: its record and the
+// augment pairs it wins most with.
+type AKAugmentDetail struct {
+	ID      int
+	Games   int
+	WinRate float64
+	Pairs   []AKPair
+}
+
+// AramkitAugmentDetail returns an augment's all-champion statistics.
+func (c *Community) AramkitAugmentDetail(ctx context.Context, augID int) (*AKAugmentDetail, error) {
+	path, ver, err := c.aramkitPath(ctx)
+	if err != nil {
+		return nil, err
+	}
+	url := fmt.Sprintf("%s%s/stats/all/augment-details/%d.json", aramkitBase, path, augID)
+	b, err := c.fetch(ctx, fmt.Sprintf("aramkit-%s-aug-%d.json", ver, augID), url, 6*time.Hour)
+	if err != nil {
+		return nil, err
+	}
+	var raw struct {
+		Augment struct {
+			Games   int     `json:"sampleCount"`
+			WinRate float64 `json:"winRate"`
+		} `json:"augment"`
+		Pairs []AKPair `json:"combinations"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return nil, fmt.Errorf("aramkit augment %d: %w", augID, err)
+	}
+	return &AKAugmentDetail{ID: augID, Games: raw.Augment.Games, WinRate: raw.Augment.WinRate, Pairs: raw.Pairs}, nil
+}
+
+// GlobalPair finds the recorded all-champion pair of augID with any picked
+// augment, looking in both augments' pair lists.
+func GlobalPair(details map[int]*AKAugmentDetail, augID int, picked []int) (AKPair, int, bool) {
+	var best AKPair
+	partner, ok := 0, false
+	consider := func(p AKPair, other int) {
+		if !ok || p.WinRate > best.WinRate {
+			best, partner, ok = p, other, true
+		}
+	}
+	for _, x := range picked {
+		for _, src := range []int{augID, x} {
+			d := details[src]
+			if d == nil {
+				continue
+			}
+			for _, p := range d.Pairs {
+				if len(p.AugmentIDs) == 2 && ((p.AugmentIDs[0] == augID && p.AugmentIDs[1] == x) || (p.AugmentIDs[1] == augID && p.AugmentIDs[0] == x)) {
+					consider(p, x)
+				}
+			}
+		}
+	}
+	return best, partner, ok
+}

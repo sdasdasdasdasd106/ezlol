@@ -26,7 +26,8 @@ type offerCard struct {
 	PairWR     float64         `json:"pairWinRate,omitempty"`
 	PairGames  int             `json:"pairGames,omitempty"`
 	PairWith   string          `json:"pairWith,omitempty"`
-	Fit        float64         `json:"fit,omitempty"` // your items: win rate with this augment vs without
+	PairGlobal bool            `json:"pairGlobal,omitempty"` // pair figures are all-champion, not this champion's
+	Fit        float64         `json:"fit,omitempty"`        // your items: win rate with this augment vs without
 	FitOK      bool            `json:"fitOk"`
 	FitGames   int             `json:"fitGames,omitempty"`
 	Core       *builds.AugCore `json:"core,omitempty"` // what people build after taking it
@@ -93,14 +94,7 @@ type offerState struct {
 	lastStatus string // OCR status of the last scan, shown while waiting
 }
 
-var styleName = map[string]string{"crit": "暴击流", "on_hit": "攻速特效流", "ap": "法强流", "hybrid": "混伤流", "lethality": "穿甲流", "tank": "坦克流", "bruiser": "战士流", "ad": "物理流"}
-
-func styleLabel(k string) string {
-	if n, ok := styleName[k]; ok {
-		return n
-	}
-	return k
-}
+func styleLabel(k string) string { return builds.StyleName(k) }
 
 // Picks returns the augments taken so far this game.
 func (s *Server) Picks() []augPick {
@@ -488,6 +482,20 @@ func (s *Server) rankMayhem(ctx context.Context, me *livePlayer, stage int, offe
 		names[p.AugmentID] = p.Name
 	}
 	stageLabel := map[int]string{1: "开局", 2: "7 级", 3: "11 级", 4: "15 级"}[stage]
+	// All-champion augment details (pairs) for the picked and offered augments.
+	details := map[int]*builds.AKAugmentDetail{}
+	if len(pickedIDs) > 0 {
+		for _, id := range pickedIDs {
+			if d, err := s.community.AramkitAugmentDetail(ctx, id); err == nil {
+				details[id] = d
+			}
+		}
+		for _, a := range offered {
+			if d, err := s.community.AramkitAugmentDetail(ctx, a.ID); err == nil {
+				details[a.ID] = d
+			}
+		}
+	}
 	for _, a := range offered {
 		c := offerCard{Augment: a}
 		if r, ok := ak.StageStat(stage, a.ID); ok {
@@ -514,6 +522,18 @@ func (s *Server) rankMayhem(ctx context.Context, me *livePlayer, stage int, offe
 				c.Score += bonus / 2
 			}
 			c.Reasons = append(c.Reasons, fmt.Sprintf("和已选「%s」一起胜率 %s（%s）", c.PairWith, pct(p.WinRate), games(p.Games)))
+		} else if len(pickedIDs) > 0 {
+			// This champion's data only lists its top 10 pairs; fall back to the
+			// all-champion pairs, at a lower weight, compared with the augment's
+			// own all-champion win rate.
+			if p, partner, ok := builds.GlobalPair(details, a.ID, pickedIDs); ok {
+				if cd := details[a.ID]; cd != nil && cd.WinRate > 0 {
+					lift := builds.Shrink(p.WinRate, p.Games, cd.WinRate) - cd.WinRate
+					c.Score += lift / 4
+					c.PairWR, c.PairGames, c.PairWith, c.PairGlobal = p.WinRate, p.Games, names[partner], true
+					c.Reasons = append(c.Reasons, fmt.Sprintf("全英雄数据：和已选「%s」一起选胜率 %s，比它平均 %s（%s）", c.PairWith, pct(p.WinRate), signedPct(p.WinRate-cd.WinRate), games(p.Games)))
+				}
+			}
 		}
 		if abs != nil {
 			ab := abs[a.ID]
@@ -527,10 +547,11 @@ func (s *Server) rankMayhem(ctx context.Context, me *livePlayer, stage int, offe
 					c.Reasons = append(c.Reasons, fmt.Sprintf("和你现在的装备不太搭：这些装备配它胜率 %s", signedPct(fit)))
 				}
 			}
-			if plan := builds.PlanAugBuild(d, ak, abs, []int{a.ID}, me.Items); len(plan.Cores) > 0 {
+			plan := builds.PlanAugBuild(d, ak, abs, []int{a.ID}, me.Items)
+			if len(plan.Cores) > 0 {
 				core := plan.Cores[0]
 				c.Core = &core
-				line := "选它后主流出装：" + styleLabel(core.Style) + " · "
+				line := "推荐核心：" + styleLabel(core.Style) + " · "
 				for i, it := range core.Items {
 					if i > 0 {
 						line += " → "
@@ -538,8 +559,14 @@ func (s *Server) rankMayhem(ctx context.Context, me *livePlayer, stage int, offe
 					line += it.Name
 				}
 				c.Reasons = append(c.Reasons, line+fmt.Sprintf("（胜率 %s，%s）", pct(core.WinRate), games(core.Games)))
-				if core.Owned == 0 && plan.Slot > 1 {
-					c.Reasons = append(c.Reasons, "注意：选它的人大多走"+styleLabel(core.Style)+"，和你已经出的装备不是一个路子，选了可能要转出装")
+			}
+			// Which build style goes with this augment, and whether your items
+			// point the other way. A conflict is shown right after the win rate.
+			if dir := plan.Direction; dir != nil && dir.Note != "" {
+				if dir.Conflict {
+					c.Reasons = append(c.Reasons[:1], append([]string{"注意：" + dir.Note}, c.Reasons[1:]...)...)
+				} else {
+					c.Reasons = append(c.Reasons, "路线："+dir.Note)
 				}
 			}
 		}

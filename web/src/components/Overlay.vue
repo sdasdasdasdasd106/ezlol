@@ -163,6 +163,7 @@ onUnmounted(() => {
       <div v-if="lastPick" class="picked">
         已记：{{ STAGE[lastPick.stage] }}「{{ lastPick.name }}」<span v-if="lastPick.assumed" class="muted">（按推荐；不对就按 {{ pretty(hotkeys.pick1) }}/2/3）</span>
       </div>
+      <div v-if="plan?.plan.direction?.conflict" class="problem">注意：{{ plan.plan.direction.note }}</div>
       <div v-if="plan?.plan.next?.length" class="next">
         <span class="muted">下一件：</span>
         <span v-for="x in plan.plan.next.slice(0, 3)" :key="x.item.id" class="it">

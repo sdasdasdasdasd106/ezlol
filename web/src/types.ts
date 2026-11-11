@@ -79,6 +79,7 @@ export interface OfferCard extends Augment {
   pairWinRate?: number
   pairGames?: number
   pairWith?: string
+  pairGlobal?: boolean
   fit?: number
   fitOk: boolean
   core?: AugCore
@@ -117,6 +118,23 @@ export interface AugItem {
   winRate: number
   games: number
   lift: number
+  lowSample?: boolean
+}
+
+export interface StyleStat {
+  style: string
+  name: string
+  winRate: number
+  games: number
+  share: number
+}
+
+export interface Direction {
+  popular: StyleStat
+  best: StyleStat
+  yours?: StyleStat
+  conflict: boolean
+  note: string
 }
 
 export interface AugCore {
@@ -132,7 +150,18 @@ export interface AugCore {
 
 /** GET /api/champions/{key}/augment-build */
 export interface AugBuildResponse {
-  plan: { augments: number[]; games: number; slot: number; slotBase: number; next: AugItem[] | null; cores: AugCore[] | null; source: string }
+  plan: {
+    augments: number[]
+    games: number
+    slot: number
+    slotBase: number
+    basis: 'path' | 'partial' | 'all' | ''
+    next: AugItem[] | null
+    boots: AugItem[] | null
+    cores: AugCore[] | null
+    direction: Direction | null
+    source: string
+  }
   augments: Augment[]
   championWinRate: number
   version: string

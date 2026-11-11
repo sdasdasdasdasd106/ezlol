@@ -50,6 +50,11 @@ const pct = (x: number) => `${(x * 100).toFixed(1)}%`
 const signed = (x: number) => `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}%`
 const n = (g: number) => (g >= 10000 ? `${(g / 10000).toFixed(1)} 万` : String(g))
 const ownedSet = computed(() => new Set(owned.value))
+const BASIS: Record<string, string> = {
+  path: '依据：选了这些强化、并且出了和你一样装备的玩家',
+  partial: '依据：选了这些强化、出装和你部分相同的玩家',
+  all: '依据：所有选了这些强化的玩家（没找到和你出装一致的路线）',
+}
 // Previewing from the augment lists: bring this box into view.
 watch(
   () => s.augPreview.length,
@@ -75,15 +80,27 @@ watch(
     <div v-else-if="loading && !data" class="muted">正在加载强化出装数据…</div>
     <div v-else-if="err" class="note">{{ err }}</div>
     <template v-else-if="data">
+      <div v-if="data.plan.direction?.note" class="dir" :class="{ conflict: data.plan.direction.conflict }">
+        {{ data.plan.direction.conflict ? '注意：' : '路线：' }}{{ data.plan.direction.note }}
+      </div>
       <div class="cols">
         <div>
           <h3>{{ inGame ? `下一件（第 ${data.plan.slot} 件）` : '第 1 件选什么' }}</h3>
+          <div class="basis muted">{{ BASIS[data.plan.basis] ?? '' }}</div>
           <div v-if="!data.plan.next?.length" class="muted">样本不够，没有可靠推荐。</div>
           <div v-for="(x, i) in data.plan.next ?? []" :key="x.item.id" class="row" :class="{ top: i === 0 }">
             <img :src="x.item.image" :alt="x.item.name" />
             <span class="name">{{ x.item.name }}</span>
-            <span class="stat"><b>{{ pct(x.winRate) }}</b><i :class="x.lift >= 0 ? 'up' : 'down'">{{ signed(x.lift) }}</i> · {{ n(x.games) }} 场</span>
+            <span class="stat"><b>{{ pct(x.winRate) }}</b><i :class="x.lift >= 0 ? 'up' : 'down'">{{ signed(x.lift) }}</i> · {{ n(x.games) }} 场<em v-if="x.lowSample" class="low">样本少</em></span>
           </div>
+          <template v-if="data.plan.boots?.length">
+            <h3>鞋子</h3>
+            <div v-for="x in data.plan.boots" :key="x.item.id" class="row">
+              <img :src="x.item.image" :alt="x.item.name" />
+              <span class="name">{{ x.item.name }}</span>
+              <span class="stat"><b>{{ pct(x.winRate) }}</b>{{ n(x.games) }} 场<em v-if="x.lowSample" class="low">样本少</em></span>
+            </div>
+          </template>
         </div>
         <div>
           <h3>核心出装</h3>
@@ -135,4 +152,8 @@ h3 { margin-top: 4px; }
 .foot { font-size: 11px; margin-top: 6px; }
 .note { font-size: 12px; }
 .noimg { font-size: 11px; padding: 0 4px; border: 1px solid var(--gold-deep); }
+.dir { font-size: 12px; padding: 5px 8px; margin-bottom: 8px; border-left: 3px solid var(--hextech-2); background: var(--surface-raised); }
+.dir.conflict { border-left-color: var(--red, #e84057); color: #f0b0b8; }
+.basis { font-size: 11px; margin: -4px 0 6px; }
+.low { font-style: normal; font-size: 10px; margin-left: 4px; padding: 0 3px; border: 1px solid var(--gold-deep); color: var(--muted); }
 </style>
