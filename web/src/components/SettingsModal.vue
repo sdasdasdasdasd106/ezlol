@@ -5,6 +5,7 @@ import type { SettingsView, UpdateInfo } from '../types'
 import { DEFAULT_HOTKEYS, hotkeyFromEvent, prettyHotkey } from '../api'
 import type { AppSettings, Hotkeys } from '../api'
 import * as sound from '../sound'
+import { theme, THEMES } from '../theme'
 
 const emit = defineEmits<{ close: [] }>()
 
@@ -440,6 +441,17 @@ onBeforeUnmount(() => {
                 </button>
               </dd>
             </div>
+            <div class="setting">
+              <dt>
+                <span class="lbl">外观</span>
+                <span class="desc muted">简约：深灰底、圆角，干净好读；海克斯：英雄联盟客户端的金色风格。</span>
+              </dt>
+              <dd>
+                <div class="seg" role="radiogroup" aria-label="外观">
+                  <button v-for="t in THEMES" :key="t.id" type="button" role="radio" :aria-checked="theme === t.id" :class="{ on: theme === t.id }" @click="theme = t.id">{{ t.label }}</button>
+                </div>
+              </dd>
+            </div>
           </dl>
 
           <!-- Desktop app (Electron only) -->
@@ -599,6 +611,9 @@ onBeforeUnmount(() => {
 /* Every control shares one height so each row reads as a single line */
 .setting input { height: var(--ctl-h); padding: 0 var(--sp-3); }
 .setting .short { flex: none; width: 96px; }
+.seg { display: inline-flex; padding: 3px; gap: 3px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-input); }
+.body .seg button { height: calc(var(--ctl-h) - 8px); border: 0; background: transparent; box-shadow: none; color: var(--muted); }
+.body .seg button.on { background: var(--panel-2); color: var(--text); box-shadow: 0 0 0 1px var(--border); }
 .body button.hk { min-width: 132px; justify-content: center; font-family: ui-monospace, Menlo, monospace; }
 .body button.hk.rec { border-color: var(--hextech-2); color: var(--hextech-2); }
 .body button.hk.bad { border-color: var(--amber); color: var(--amber); }

@@ -287,26 +287,37 @@ export class DashboardGrid implements Dashboard {
       return
     }
     if (!saved) this.track(el, 40)
+    // The game screen changes as you play (nothing read, cards, picks): its
+    // boxes follow their content for the whole game, until the user arranges them.
+    else if (this.mode() === 'game' && !this.layouts.game?.[realID]) this.track(el, 40, () => !this.layouts.game?.[realID])
   }
 
 
-  /** Grow/shrink an auto-sized widget as its content settles; stops once the user edits. */
-  private track(el: HTMLElement, maxRows: number) {
+  /**
+   * Grow/shrink an auto-sized widget as its content settles; stops once the
+   * user edits. live: keep following the content while it returns true (and
+   * close the gaps it leaves), instead of only for the first seconds.
+   */
+  private track(el: HTMLElement, maxRows: number, live?: () => boolean) {
     if (!el.firstElementChild) return
     let last = 0
     const tick = () => {
-      if (!this.grid || this.editing) return
-      const rows = Math.min(maxRows, rowsFor(naturalHeight(el)))
+      if (!this.grid || this.editing || (live && !live())) return
+      const rows = Math.min(maxRows, Math.max(3, rowsFor(naturalHeight(el))))
       if (rows === last) return
       last = rows
       const node = (el as HTMLElement & { gridstackNode?: { h?: number } }).gridstackNode
-      if (node && node.h !== rows) this.grid.update(el, { h: rows })
+      if (node && node.h !== rows) {
+        this.grid.update(el, { h: rows })
+        if (live) this.grid.compact()
+      }
     }
     // Content that was mid-load at mount (fonts, data) settles within a few seconds;
     // poll for that window, then leave the layout alone during play.
-    const timer = setInterval(tick, 400)
+    const timer = setInterval(tick, live ? 600 : 400)
     const ro = { disconnect: () => clearInterval(timer) } as ResizeObserver
     this.auto.set(el, ro)
+    if (live) return
     setTimeout(() => {
       clearInterval(timer)
       this.auto.delete(el)

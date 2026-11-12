@@ -12,8 +12,6 @@ import AugmentBuild from './components/AugmentBuild.vue'
 import StrategyCard from './components/StrategyCard.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import Toasts from './components/Toasts.vue'
-import ThemeMenu from './components/ThemeMenu.vue'
-import type { ThemeOption } from './components/ThemeMenu.vue'
 import { toast } from './toast'
 import { say, setVoice, useGameVoice } from './voice'
 import type { UpdateInfo } from './types'
@@ -24,29 +22,8 @@ const game = ref<Game | null>(null)
 const champions = ref<Champion[]>([])
 const selected = ref<Champion | null>(null)
 const followPick = ref(true)
-const soundOn = ref(sound.enabled())
 const showSettings = ref(false)
-const THEMES: ThemeOption[] = [
-  { id: 'hextech', label: '海克斯', swatch: ['#010a13', '#c8aa6e', '#0ac8b9'] },
-  { id: 'linear', label: '简洁深色', swatch: ['#0b0c10', '#141519', '#7c7cff'] },
-  { id: 'neon', label: '霓虹', swatch: ['#05060d', '#ff2bd6', '#00f0ff'] },
-  { id: 'synthwave', label: '合成波', swatch: ['#170a2b', '#ff2d95', '#ffd166'] },
-  { id: 'terminal', label: '终端', swatch: ['#000000', '#1f3a1f', '#39ff14'] },
-  { id: 'sketch', label: '手绘', swatch: ['#f6f1e7', '#2b2b2b', '#ffe066'] },
-]
-const themeParam = params.get('theme')
-const theme = ref<string>(
-  THEMES.some((t) => t.id === themeParam) ? (themeParam as string) : THEMES.some((t) => t.id === localStorage.getItem('ezlol.theme')) ? (localStorage.getItem('ezlol.theme') as string) : 'hextech',
-)
 if (params.get('open') === 'settings') setTimeout(() => (showSettings.value = true), 800)
-watch(
-  theme,
-  (t) => {
-    document.documentElement.dataset.theme = t
-    localStorage.setItem('ezlol.theme', t)
-  },
-  { immediate: true },
-)
 const upd = ref<UpdateInfo | null>(null)
 const electronUpdate = ref<{ status: string; version?: string; error?: string; progress?: number } | null>(null)
 const installUpdate = () => window.ezlol?.installUpdate?.()
@@ -197,7 +174,6 @@ function forgetLayout() {
   toast({ key: 'layout', kind: 'info', title: '已删除保存的布局', body: '「重置」会回到默认布局。', ttl: 4000 })
 }
 watch([editing, modeKey], () => (hasPreset.value = dash.hasPreset()))
-watch(soundOn, (v) => sound.setEnabled(v))
 
 function select(c: Champion) {
   selected.value = c
@@ -212,21 +188,21 @@ function select(c: Champion) {
       <span v-if="status" class="pill" :class="status.connected ? 'ok' : 'bad'">
         <i class="dot" />{{ status.connected ? `${status.summoner || '已连接'}` : '客户端未运行' }}
       </span>
-      <span v-if="status?.patch" class="pill"><i class="dot" />版本 {{ status.patch }}</span>
       <span v-if="status?.queueName" class="pill warn"><i class="dot" />{{ status.queueName }}</span>
       <div class="grow" />
-      <label class="toggle" :class="{ on: editing }" title="拖动、调整各个面板；每个界面的布局分开保存" @click="editing = !editing">
-        <span class="track" /><span>编辑布局</span>
-      </label>
-      <button v-if="editing" class="primary" title="记住这个界面的当前布局" @click="saveLayout">保存布局</button>
-      <button v-if="editing" :title="hasPreset ? '回到你保存的布局' : '回到默认布局'" @click="resetLayout">重置</button>
-      <button v-if="editing && hasPreset" class="danger" title="删除这个界面保存的布局" @click="forgetLayout">删除保存</button>
-      <label class="toggle" :class="{ on: soundOn }" @click="soundOn = !soundOn">
-        <span class="track" /><span>提示音</span>
-      </label>
-      <ThemeMenu v-model="theme" :options="THEMES" />
+      <template v-if="editing">
+        <span class="muted">拖动面板调整位置和大小</span>
+        <button class="primary" title="记住这个界面的当前布局" @click="saveLayout">保存布局</button>
+        <button :title="hasPreset ? '回到你保存的布局' : '回到默认布局'" @click="resetLayout">重置</button>
+        <button v-if="hasPreset" class="danger" title="删除这个界面保存的布局" @click="forgetLayout">删除保存</button>
+      </template>
+      <button class="gear" :class="{ active: editing }" :title="editing ? '完成调整' : '调整布局'" :aria-label="editing ? '完成调整' : '调整布局'" @click="editing = !editing">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="3" width="7" height="9" rx="1.5" /><rect x="14" y="3" width="7" height="5" rx="1.5" /><rect x="14" y="12" width="7" height="9" rx="1.5" /><rect x="3" y="16" width="7" height="5" rx="1.5" />
+        </svg>
+      </button>
       <button class="gear" title="设置" aria-label="设置" @click="showSettings = true">
-        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="3" />
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
         </svg>

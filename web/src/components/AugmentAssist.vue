@@ -32,6 +32,7 @@ const cards = computed<OfferCard[]>(() => {
 })
 const bestId = computed(() => offer.value?.offered?.[0]?.id)
 const bestPlace = computed(() => place(cards.value.findIndex((c) => c.id === bestId.value), cards.value.length))
+const RARITY: Record<string, string> = { prismatic: '棱彩', gold: '金色', silver: '银色' }
 const warn = (r: string) => r.startsWith('注意') || r.startsWith('和你现在的装备不太搭')
 // The win-rate line is shown as numbers; the build line is shown as icons.
 const reasonsOf = (c: OfferCard) => c.reasons.slice(1).filter((r) => !r.startsWith('推荐核心')).slice(0, 2)
@@ -98,116 +99,142 @@ watch(
 
 <template>
   <Widget id="augment-assist" :w="12">
-    <h2>
-      强化推荐 <span v-if="game?.me" class="muted sub">{{ game.me.champion.name }} · {{ game.me.level }} 级</span>
-      <button v-if="canScan" class="sm scan" :disabled="scanning" :title="`截屏识别现在屏幕上的强化（游戏里按 ${scanKey}）`" @click="scanNow">{{ scanning ? '识别中…' : '立即识别' }}</button>
+    <h2 class="hd">
+      强化推荐<span v-if="game?.me" class="sub">{{ game.me.champion.name }} · {{ game.me.level }} 级</span>
+      <button v-if="canScan" class="scan" :disabled="scanning" :title="`截屏识别现在屏幕上的强化（游戏里按 ${scanKey}）`" @click="scanNow">
+        {{ scanning ? '识别中…' : '立即识别' }}<kbd>{{ scanKey }}</kbd>
+      </button>
     </h2>
-    <div v-if="scanMsg" class="note">{{ scanMsg }}</div>
+    <div v-if="scanMsg" class="msg">{{ scanMsg }}</div>
 
-    <div v-if="!game?.inGame" class="muted">进入海克斯乱斗后，选强化时按 <b>{{ scanKey }}</b>，切出来在这里看推荐。</div>
-    <div v-else-if="mode !== 'aram'" class="muted">这不是海克斯乱斗对局，没有强化可选。</div>
+    <div v-if="!game?.inGame" class="empty">进入海克斯乱斗后，选强化时按 <kbd>{{ scanKey }}</kbd>，切出来在这里看推荐。</div>
+    <div v-else-if="mode !== 'aram'" class="empty">这不是海克斯乱斗对局，没有强化可选。</div>
     <template v-else>
       <template v-if="offer">
-        <div class="take">选{{ bestPlace }}的「{{ offer.best }}」<span class="why">{{ STAGE[offer.stage] }}强化</span></div>
-        <div v-if="offer.note" class="gap">{{ offer.note }}</div>
-        <div v-if="offer.ai && offer.ai.status !== 'error'" class="ai" :class="[offer.ai.status, { agree: offer.ai.agree }]">
-          <template v-if="offer.ai.status === 'pending'">AI 正在复核…</template>
-          <template v-else><b>{{ offer.ai.agree ? 'AI 同意' : `AI 建议改选「${offer.ai.pick}」` }}</b>：{{ offer.ai.reason }}</template>
+        <div class="hero">
+          <div class="kicker">{{ STAGE[offer.stage] }}强化 · 推荐</div>
+          <div class="pick">选{{ bestPlace }}的<b>{{ offer.best }}</b></div>
+          <div v-if="offer.note" class="sub2">{{ offer.note }}</div>
+          <div v-if="offer.ai && offer.ai.status !== 'error'" class="ai" :class="{ agree: offer.ai.agree, pending: offer.ai.status === 'pending' }">
+            <template v-if="offer.ai.status === 'pending'">AI 正在复核…</template>
+            <template v-else><b>{{ offer.ai.agree ? 'AI 同意' : `AI 建议改选「${offer.ai.pick}」` }}</b>{{ offer.ai.reason }}</template>
+          </div>
+          <div v-if="offer.via === 'ai'" class="sub2 warnc">这组强化是 AI 根据识别出的文字推断的，可能不准。</div>
         </div>
-        <div v-if="offer.via === 'ai'" class="gap">这组强化是 AI 根据识别出的文字推断的，可能不准。</div>
+
         <div class="cards">
-          <div v-for="(a, i) in cards" :key="a.id" class="card" :class="[a.rarity, { best: a.id === bestId, chosen: offer.chosen === i + 1 }]" :title="a.desc">
-            <div class="head">
-              <img v-if="a.icon" :src="a.icon" :alt="a.name" /><span v-else class="noicon" />
-              <div class="body">
-                <div class="n">
-                  <span class="slot">{{ i + 1 }}</span>{{ a.name }}
-                  <span v-if="a.id === bestId" class="rec">推荐</span><span v-if="aiPick(a.name)" class="rec aipick">AI</span>
-                </div>
-                <div class="s">{{ a.stageGames ? `胜率 ${pct(a.stageWinRate)}（比平均 ${signed(a.lift)}）` : '数据少' }}</div>
+          <article v-for="(a, i) in cards" :key="a.id" class="card" :class="[a.rarity, { best: a.id === bestId, chosen: offer.chosen === i + 1 }]" :title="a.desc">
+            <header>
+              <span class="slot">{{ i + 1 }}</span>
+              <img v-if="a.icon" class="ico" :src="a.icon" :alt="a.name" /><span v-else class="ico" />
+              <div class="title">
+                <div class="name">{{ a.name }}</div>
+                <div class="rar">{{ RARITY[a.rarity] ?? '' }}</div>
               </div>
+              <span v-if="a.id === bestId" class="tag">推荐</span>
+              <span v-else-if="aiPick(a.name)" class="tag ai">AI 推荐</span>
+            </header>
+            <div class="wr">
+              <template v-if="a.stageGames">
+                <b>{{ pct(a.stageWinRate) }}</b><span :class="a.lift >= 0 ? 'up' : 'down'">{{ signed(a.lift) }}</span>
+              </template>
+              <span v-else class="na">数据少</span>
             </div>
             <ul v-if="reasonsOf(a).length" class="reasons">
               <li v-for="(r, j) in reasonsOf(a)" :key="j" :class="{ warn: warn(r) }">{{ r }}</li>
             </ul>
-            <div v-if="a.core" class="core">
+            <footer v-if="a.core" class="build">
               <span class="lab">选它后出装</span>
-              <template v-for="(it, j) in a.core.items" :key="it.id">
-                <span v-if="j" class="arrow">›</span><img v-if="it.image" :src="it.image" :title="it.name" :alt="it.name" /><span v-else class="noimg">{{ it.name || it.id }}</span>
-              </template>
-              <img v-if="a.core.boots?.image" :src="a.core.boots.image" :title="a.core.boots.name" class="boots" />
-            </div>
-          </div>
+              <div class="items">
+                <template v-for="(it, j) in a.core.items" :key="it.id">
+                  <span v-if="j" class="arrow">›</span><img v-if="it.image" :src="it.image" :title="it.name" :alt="it.name" /><span v-else class="noimg">{{ it.name || it.id }}</span>
+                </template>
+                <img v-if="a.core.boots?.image" :src="a.core.boots.image" :title="a.core.boots.name" class="boots" />
+              </div>
+            </footer>
+          </article>
         </div>
-        <div class="hint muted">选完按 {{ pickKeys }}（左 / 中 / 右）记下选的是哪个，下面的出装会按它推荐；不按就记为推荐的那个。</div>
+        <p class="hint">选完按 <kbd>{{ pickKeys }}</kbd>（左 / 中 / 右）记下选的是哪个，下面的出装按它推荐；不按就记为推荐的那个。</p>
       </template>
-      <div v-else-if="game?.offer?.waiting" class="muted">还在加载画面。</div>
-      <div v-else-if="game?.offer?.pending" class="wait">{{ STAGE[game.offer.stage] }}强化待选：选择界面打开后按 <b>{{ scanKey }}</b>，再切出来看。</div>
-      <div v-else class="muted">开局和 7 / 11 / 15 级选强化时，按 <b>{{ scanKey }}</b> 识别。</div>
+      <div v-else-if="game?.offer?.waiting" class="empty">还在加载画面。</div>
+      <div v-else-if="game?.offer?.pending" class="empty due">{{ STAGE[game.offer.stage] }}强化待选：选择界面打开后按 <kbd>{{ scanKey }}</kbd>，再切出来看。</div>
+      <div v-else class="empty">开局和 7 / 11 / 15 级选强化时，按 <kbd>{{ scanKey }}</kbd> 识别。</div>
 
       <div v-if="picks.length" class="picks">
-        <span class="muted">已选：</span>
+        <span class="lab">已选</span>
         <span v-for="p in picks" :key="p.stage" class="chip" :class="[p.rarity, { assumed: p.assumed }]">
           <img v-if="p.icon" :src="p.icon" alt="" />
-          <span>{{ STAGE[p.stage] }} {{ p.name }}</span>
-          <button class="sm" :title="p.assumed ? '这是按推荐记的；选的不是它就点这里改' : '改成其他选项'" @click="fixing = fixing === p.stage ? null : p.stage">{{ p.assumed ? '不对？' : '改' }}</button>
+          <span class="st">{{ STAGE[p.stage] }}</span>{{ p.name }}
+          <button class="fixbtn" :title="p.assumed ? '这是按推荐记的；选的不是它就点这里改' : '改成其他选项'" @click="fixing = fixing === p.stage ? null : p.stage">{{ p.assumed ? '不对？' : '改' }}</button>
           <span v-if="fixing === p.stage" class="fix">
-            <button v-for="o in p.offered" :key="o.id" class="sm" :class="{ active: o.id === p.augmentId }" @click="correct(p, o.id)">{{ o.name }}</button>
-            <button class="sm danger" title="这条记录是错的（其实没选过）：删掉它" @click="correct(p, 0)">删除</button>
+            <button v-for="o in p.offered" :key="o.id" class="fixbtn" :class="{ active: o.id === p.augmentId }" @click="correct(p, o.id)">{{ o.name }}</button>
+            <button class="fixbtn danger" title="这条记录是错的（其实没选过）：删掉它" @click="correct(p, 0)">删除</button>
           </span>
         </span>
       </div>
-      <div v-if="scanNote" class="note">{{ scanNote }}</div>
+      <div v-if="scanNote" class="msg">{{ scanNote }}</div>
     </template>
   </Widget>
 </template>
 
 <style scoped>
-.sub { text-transform: none; letter-spacing: 0; margin-left: 8px; }
-h2 .scan { margin-left: auto; float: right; text-transform: none; letter-spacing: 0; }
-.take { font-family: var(--display); font-size: 18px; font-weight: 700; color: var(--hextech-2); margin-bottom: 4px; }
-.why { font-family: inherit; font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 10px; }
-.gap { font-size: 12px; color: var(--gold-bright); margin-bottom: 8px; }
-.ai { font-size: 12px; margin-bottom: 8px; padding: 4px 8px; border-left: 3px solid var(--gold-deep); background: var(--surface-raised); line-height: 1.5; }
-.ai.pending { color: var(--muted); }
-.ai.error { color: var(--muted); border-left-color: var(--red, #e84057); }
-.ai.done { border-left-color: #f0d48a; }
-.ai.done.agree { border-left-color: var(--hextech-2); }
-.ai .conf { color: var(--muted); margin-left: 6px; }
-.rec.aipick { margin-left: 4px; color: #f0d48a; border-color: #f0d48a; }
-.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.hd { display: flex; align-items: center; gap: 8px; }
+.sub { font-weight: 400; font-size: 12px; color: var(--muted); text-transform: none; letter-spacing: 0; }
+.scan { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; padding: 5px 6px 5px 12px; font-size: 12px; text-transform: none; letter-spacing: 0; }
+kbd { font-family: inherit; font-size: 11px; padding: 1px 6px; border-radius: 5px; border: 1px solid var(--border, var(--gold-deep)); background: var(--surface-input); color: var(--muted); white-space: nowrap; }
+.empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
+.empty.due { color: var(--text); padding: 10px 12px; border-radius: var(--radius-sm); background: var(--accent-soft); }
+.msg { font-size: 12px; color: var(--amber); margin: 4px 0 8px; }
+
+.hero { margin: 2px 0 12px; }
+.kicker { font-size: 12px; color: var(--muted); }
+.pick { font-size: 22px; font-weight: 600; color: var(--text); margin-top: 2px; }
+.pick b { color: var(--accent); margin-left: 6px; font-weight: 700; }
+.sub2 { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.warnc { color: var(--amber); }
+.ai { margin-top: 8px; font-size: 12px; line-height: 1.5; padding: 7px 10px; border-radius: var(--radius-sm); background: var(--surface-raised); color: var(--text); border-left: 3px solid var(--amber); }
+.ai.agree { border-left-color: var(--accent); }
+.ai.pending { color: var(--muted); border-left-color: var(--border, var(--gold-deep)); }
+.ai b { margin-right: 6px; }
+
+.cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 @media (max-width: 900px) { .cards { grid-template-columns: 1fr; } }
-.card { padding: 8px; border: 1px solid var(--gold-deep); background: var(--surface-raised); min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-.card.best { border-color: var(--hextech-2); box-shadow: inset 0 0 0 1px var(--accent-glow), 0 0 14px var(--accent-glow); }
-.card.prismatic { border-left: 3px solid var(--rarity-prismatic, #3fb4d8); }
-.card.gold { border-left: 3px solid var(--rarity-gold, var(--gold)); }
-.card.silver { border-left: 3px solid var(--rarity-silver, #8b9bb0); }
-.head { display: grid; grid-template-columns: 40px 1fr; gap: 8px; align-items: center; }
-.head img, .noicon { width: 40px; height: 40px; border: 1px solid var(--gold-deep); background: #000; }
-.body { min-width: 0; }
-.n { font-weight: 700; display: flex; align-items: center; gap: 6px; }
-.rec { margin-left: auto; font-size: 11px; color: var(--hextech-2); border: 1px solid var(--hextech-dim); padding: 0 5px; }
-.s { font-size: 12px; color: var(--muted); }
-.reasons { margin: 0; padding-left: 16px; font-size: 12px; line-height: 1.45; }
-.reasons li.warn { color: var(--red, #e84057); }
-.core { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
-.core img { width: 26px; height: 26px; border: 1px solid var(--gold-deep); background: #000; }
-.core img.boots { margin-left: 6px; }
-.core .arrow { color: var(--muted); }
-.core .lab { font-size: 11px; color: var(--muted); margin-right: 4px; }
-.slot { font-family: var(--display); font-size: 12px; width: 18px; height: 18px; display: inline-grid; place-items: center; border: 1px solid var(--gold-deep); color: var(--gold); }
-.card.chosen { outline: 2px solid #f0d48a; }
-.hint { margin-top: 8px; font-size: 12px; }
-.d { font-size: 11px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.tp { font-family: var(--display); font-size: 10px; width: 16px; height: 16px; display: grid; place-items: center; border: 1px solid var(--gold-deep); color: var(--muted); }
-.tp.t1 { color: #ff8a3d; border-color: #ff8a3d; } .tp.t2 { color: var(--gold); border-color: var(--gold); } .tp.t3 { color: var(--hextech-2); border-color: var(--hextech-dim); }
-.wait { font-size: 13px; border: 1px dashed var(--gold-deep); padding: 6px 10px; color: var(--gold-bright); }
-.picks { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; }
-.chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 4px 2px 2px; border: 1px solid var(--gold-deep); background: var(--surface-raised); }
+.card { display: flex; flex-direction: column; gap: 8px; padding: 12px; min-width: 0; border-radius: var(--radius); border: 1px solid var(--border, var(--gold-deep)); background: var(--surface-raised); }
+.card.best { border-color: var(--accent); background: linear-gradient(180deg, var(--accent-soft), transparent 70%), var(--surface-raised); }
+.card.chosen { box-shadow: 0 0 0 2px var(--amber); }
+.card header { display: flex; align-items: center; gap: 10px; }
+.slot { flex: none; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; font-size: 11px; color: var(--muted); background: var(--surface-input); border: 1px solid var(--border, var(--gold-deep)); }
+.ico { flex: none; width: 40px; height: 40px; border-radius: 8px; background: #000; border: 2px solid var(--border, var(--gold-deep)); }
+.card.prismatic .ico { border-color: var(--rarity-prismatic); }
+.card.gold .ico { border-color: var(--rarity-gold); }
+.card.silver .ico { border-color: var(--rarity-silver); }
+.title { min-width: 0; flex: 1; }
+.name { font-size: 15px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rar { font-size: 11px; color: var(--muted); }
+.card.prismatic .rar { color: var(--rarity-prismatic); } .card.gold .rar { color: var(--rarity-gold); } .card.silver .rar { color: var(--rarity-silver); }
+.tag { flex: none; align-self: flex-start; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; color: var(--btn-primary-text); background: var(--accent); }
+.tag.ai { background: var(--amber); color: #1a1405; }
+.wr { display: flex; align-items: baseline; gap: 8px; }
+.wr b { font-size: 20px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.wr .up { font-size: 12px; color: var(--green); } .wr .down { font-size: 12px; color: var(--red); }
+.wr .na { font-size: 12px; color: var(--muted); }
+.reasons { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; font-size: 12px; line-height: 1.45; color: var(--muted); }
+.reasons li.warn { color: var(--red); }
+.build { margin-top: auto; padding-top: 8px; border-top: 1px solid var(--line); display: grid; gap: 6px; }
+.build .lab { font-size: 11px; color: var(--muted); }
+.items { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.items img { width: 30px; height: 30px; border-radius: 6px; background: #000; }
+.items img.boots { margin-left: 8px; }
+.items .arrow { color: var(--dim); }
+.noimg { font-size: 11px; padding: 0 4px; border: 1px solid var(--border, var(--gold-deep)); border-radius: 4px; }
+.hint { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
+
+.picks { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; }
+.picks .lab { color: var(--muted); margin-right: 2px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 3px; border-radius: 999px; border: 1px solid var(--border, var(--gold-deep)); background: var(--surface-raised); color: var(--text); }
 .chip.assumed { border-style: dashed; }
-.chip img { width: 20px; height: 20px; }
+.chip img { width: 22px; height: 22px; border-radius: 50%; }
+.chip .st { color: var(--muted); }
 .fix { display: inline-flex; gap: 3px; }
-button.sm { padding: 2px 6px; font-size: 11px; min-height: 0; }
-.note { margin-top: 8px; font-size: 12px; }
-.noimg { font-size: 11px; padding: 0 4px; border: 1px solid var(--gold-deep); }
+.fixbtn { padding: 1px 8px; font-size: 11px; min-height: 0; border-radius: 999px; text-transform: none; letter-spacing: 0; }
 </style>
