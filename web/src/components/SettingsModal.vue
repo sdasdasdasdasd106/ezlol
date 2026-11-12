@@ -40,7 +40,7 @@ const POSITIONS: { id: OverlayPos; label: string }[] = [
   { id: 'bottom-right', label: '右下角' },
 ]
 const HOTKEY_ROWS: { key: keyof Hotkeys; label: string; desc: string }[] = [
-  { key: 'scan', label: '立即识别强化', desc: '强化选择界面打开后按一下：马上截屏识别并给出推荐，不用等自动识别。' },
+  { key: 'scan', label: '立即识别强化', desc: '强化选择界面打开后按一下：截屏识别并给出推荐。这是唯一会截屏的时候。' },
   { key: 'pick1', label: '选了第 1 个', desc: '选完按：马上记下你选的是左边第 1 个（不按就记为推荐的那个）。' },
   { key: 'pick2', label: '选了第 2 个', desc: '同上，中间那个。' },
   { key: 'pick3', label: '选了第 3 个', desc: '同上，右边那个。' },
@@ -270,7 +270,7 @@ onBeforeUnmount(() => {
             <div class="setting">
               <dt>
                 <span class="lbl"><label id="set-lbl-ocr" for="set-ocr">识别屏幕上的强化选项</label></span>
-                <span v-if="s.ocrAvailable" class="desc muted">选强化时自动读出屏幕上的三个选项，告诉你选哪个。游戏请用「无边框」或「窗口」模式，全屏模式可能截不到画面。</span>
+                <span v-if="s.ocrAvailable" class="desc muted">强化选择界面打开后按「立即识别强化」快捷键（默认 Ctrl+Alt+S），读出屏幕上的选项并告诉你选哪个。只在按键时截屏，平时不截。全屏模式可能截不到画面，截不到就改用「无边框」。</span>
                 <span v-else class="desc warn">这台电脑上用不了屏幕识别。</span>
                 <span v-if="s.ocrAvailable && s.ocrLang && !s.ocrLang.startsWith('zh')" class="desc warn">
                   当前识别语言是 {{ s.ocrLang }}，认不出中文强化名。请在 Windows「设置 → 时间和语言 → 语言」里添加「中文(简体)」，并勾选「光学字符识别」，然后重启 ezlol。
@@ -279,20 +279,6 @@ onBeforeUnmount(() => {
               <dd>
                 <button id="set-ocr" type="button" role="switch" class="toggle" :class="{ on: s.ocr && s.ocrAvailable }" :aria-checked="s.ocr && s.ocrAvailable" aria-labelledby="set-lbl-ocr" :disabled="!s.ocrAvailable" :title="s.ocrAvailable ? undefined : '这台电脑上用不了屏幕识别'" @click="save({ ocr: !s.ocr })">
                   <span class="track" aria-hidden="true" /><span class="state">{{ s.ocr && s.ocrAvailable ? '开' : '关' }}</span>
-                </button>
-              </dd>
-            </div>
-            <div class="setting">
-              <dt>
-                <span class="lbl"><label id="set-lbl-auto" for="set-auto">到级后自动识别</label></span>
-                <span class="desc muted">
-                  开：到开局 / 7 / 11 / 15 级时在后台每隔一两秒截屏，连续两次读到同一组强化才显示（更稳，但要等几秒）。
-                  关：只在你按「立即识别强化」快捷键时截屏，省电脑资源。两种方式都可以随时按快捷键马上识别。
-                </span>
-              </dt>
-              <dd>
-                <button id="set-auto" type="button" role="switch" class="toggle" :class="{ on: s.autoScan }" :aria-checked="s.autoScan" aria-labelledby="set-lbl-auto" :disabled="!s.ocr || !s.ocrAvailable" @click="save({ autoScan: !s.autoScan })">
-                  <span class="track" aria-hidden="true" /><span class="state">{{ s.autoScan ? '开' : '关' }}</span>
                 </button>
               </dd>
             </div>
@@ -505,7 +491,7 @@ onBeforeUnmount(() => {
               <div class="setting">
                 <dt>
                   <span class="lbl"><label id="set-lbl-ov" for="set-ov">显示小窗</label></span>
-                  <span class="desc muted">出现强化选择时自动弹出；选完显示记录的强化和下一件装备，十几秒后自动隐藏。</span>
+                  <span class="desc muted">进入海克斯乱斗后一直显示：出门装、下一件、核心出装和已选强化；按识别快捷键后显示强化推荐。</span>
                 </dt>
                 <dd>
                   <button id="set-ov" type="button" role="switch" class="toggle" :class="{ on: appS.overlay }" :aria-checked="appS.overlay" aria-labelledby="set-lbl-ov" :disabled="busy" @click="saveApp({ overlay: !appS.overlay })">

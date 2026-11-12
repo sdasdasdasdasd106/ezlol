@@ -10,7 +10,6 @@ import (
 // Settings is everything the user can change from the UI.
 type Settings struct {
 	OCR         bool `json:"ocr"`         // augment pick detection
-	AutoScan    bool `json:"autoScan"`    // scan in the background while a pick is due (off: only on the scan hotkey)
 	UpdateCheck bool `json:"updateCheck"` // look for new releases
 	TestLog     bool `json:"testLog"`     // write a local log of every augment scan and pick
 	LogShots    bool `json:"logShots"`    // also save screenshots of what was scanned
@@ -26,7 +25,7 @@ type Settings struct {
 
 // Defaults returns the initial configuration.
 func Defaults() Settings {
-	return Settings{OCR: true, AutoScan: true, UpdateCheck: true, TestLog: true, AIReview: true, AIResearch: true, AIText: true}
+	return Settings{OCR: true, UpdateCheck: true, TestLog: true, AIReview: true, AIResearch: true, AIText: true}
 }
 
 // Store is a mutex-guarded settings file.
@@ -76,7 +75,7 @@ func (s Settings) Masked() map[string]any {
 	if n := len(s.GitHubToken); n > 4 {
 		hint = "••••" + s.GitHubToken[n-4:]
 	}
-	return map[string]any{"ocr": s.OCR, "autoScan": s.AutoScan, "updateCheck": s.UpdateCheck, "testLog": s.TestLog, "logShots": s.LogShots,
+	return map[string]any{"ocr": s.OCR, "updateCheck": s.UpdateCheck, "testLog": s.TestLog, "logShots": s.LogShots,
 		"githubTokenSet": s.GitHubToken != "", "githubTokenHint": hint, "autoUpload": s.AutoUpload,
 		"deepseekKeySet": s.DeepSeekKey != "", "deepseekKeyHint": tail(s.DeepSeekKey), "aiReview": s.AIReview, "aiResearch": s.AIResearch, "aiText": s.AIText}
 }

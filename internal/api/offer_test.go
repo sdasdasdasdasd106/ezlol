@@ -87,3 +87,36 @@ func TestPickSlotRecordsAndCloses(t *testing.T) {
 		t.Fatalf("picks after re-read %+v", s.offer.picks)
 	}
 }
+
+// Nothing captures in the background: an offer read with the hotkey stays up
+// until the next pick level, then the recommended augment is recorded.
+func TestOfferClosesAtNextLevel(t *testing.T) {
+	s := testServer(t)
+	s.offer.mu.Lock()
+	s.syncGame(testLive(1))
+	a := builds.Augment{ID: 1, Name: "大法师"}
+	s.offer.last = &augmentOffer{Active: true, Level: 1, Stage: 1, Screen: []int{1}, Offered: []offerCard{{Augment: a}}, ScannedAt: time.Now()}
+	s.offer.mu.Unlock()
+
+	if off, _ := s.detectOffer(t.Context(), testLive(3)); off == nil || !off.Active {
+		t.Fatalf("offer should stay up: %+v", off)
+	}
+	off, _ := s.detectOffer(t.Context(), testLive(7))
+	if len(s.offer.picks) != 1 || !s.offer.picks[0].Assumed || s.offer.picks[0].Stage != 1 {
+		t.Fatalf("picks %+v", s.offer.picks)
+	}
+	if off == nil || off.Active || !off.Pending || off.Level != 7 {
+		t.Fatalf("level 7 pick should be due: %+v", off)
+	}
+
+	// An offer left alone past offerTTL is recorded too.
+	s.offer.mu.Lock()
+	s.offer.last = &augmentOffer{Active: true, Level: 7, Stage: 2, Screen: []int{1}, Offered: []offerCard{{Augment: a}}, ScannedAt: time.Now().Add(-offerTTL - time.Second)}
+	s.offer.mu.Unlock()
+	if off, _ := s.detectOffer(t.Context(), testLive(8)); off != nil {
+		t.Fatalf("expired offer still shown: %+v", off)
+	}
+	if len(s.offer.picks) != 2 {
+		t.Fatalf("picks %+v", s.offer.picks)
+	}
+}

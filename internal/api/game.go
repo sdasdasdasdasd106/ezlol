@@ -40,7 +40,6 @@ type liveResponse struct {
 	OCR      string        `json:"ocr"`                // available | disabled | unavailable | error text
 	OCRLang  string        `json:"ocrLang"`            // language the OCR helper reads, e.g. zh-Hans-CN
 	Research *researchView `json:"research,omitempty"` // AI strategy card for this champion
-	AutoScan bool          `json:"autoScan"`           // false: augments are read only when the player presses the scan hotkey
 }
 
 // game reports your champion and level in the running game, plus the augment
@@ -58,7 +57,6 @@ func (s *Server) game(w http.ResponseWriter, r *http.Request) {
 	}
 	resp.Offer, resp.OCR = s.detectOffer(r.Context(), resp)
 	resp.OCRLang = s.ocr.Lang()
-	resp.AutoScan = s.settings.Get().AutoScan
 	if resp.Me != nil && resp.Mode == "aram" {
 		if q := s.watcher.Status().QueueID; q != 450 && q != 100 {
 			resp.Research = s.research(resp.Me.Champion.ID, true)
@@ -164,7 +162,8 @@ func firstNonEmpty(a, b string) string {
 
 // augmentBuild is the item plan for a champion given augments: what to build
 // next (by your owned items) and the best core sets, from aramkit's
-// per-augment ARAM Mayhem data. ?augments=1,2&owned=3031,3006
+// per-augment ARAM Mayhem data. ?augments=1,2&owned=3031,3006. Without
+// augments (none taken yet) the plan uses all of the champion's games.
 func (s *Server) augmentBuild(w http.ResponseWriter, r *http.Request) {
 	d := s.dd.Data()
 	if d == nil {
@@ -182,10 +181,6 @@ func (s *Server) augmentBuild(w http.ResponseWriter, r *http.Request) {
 	}
 	augs := intList(r.URL.Query().Get("augments"), 4)
 	owned := intList(r.URL.Query().Get("owned"), 12)
-	if len(augs) == 0 {
-		writeErr(w, 400, "没有指定强化")
-		return
-	}
 	ak, err := s.community.AramkitChampion(r.Context(), champ.ID)
 	if err != nil {
 		writeErr(w, 502, "拿不到强化出装数据："+err.Error())

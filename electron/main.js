@@ -210,13 +210,14 @@ ipcMain.handle('app-settings:get', () => appSettingsView())
 
 // ---- Overlay: always-on-top mini window over the game ----
 // It never takes focus and lets clicks through (a focused window would pull a
-// fullscreen game out of fullscreen), and it is excluded from screen capture so
-// its own text is never OCR'd. What it shows is decided by its page; it asks
-// to be shown via 'overlay:want'.
+// fullscreen game out of fullscreen). In a game it stays up with the build;
+// it is hidden for the moment the scan hotkey captures the screen, so its own
+// text is never OCR'd. What it shows is decided by its page; it asks to be
+// shown via 'overlay:want'.
 const OVERLAY_W = 404
 let overlayWin = null
 let overlayMode = 'auto' // auto | pinned (hotkey: always show) | hidden (hotkey: hide until next offer)
-let overlayWant = 'none' // offer | info | pinned | none
+let overlayWant = 'none' // offer | game | info | pinned | none
 let overlayHeight = 160
 let previewUntil = 0
 let hotkeyErrors = []
@@ -243,7 +244,6 @@ function createOverlay() {
   })
   overlayWin.setAlwaysOnTop(true, 'screen-saver')
   overlayWin.setIgnoreMouseEvents(true)
-  overlayWin.setContentProtection(true)
   overlayWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   overlayWin.loadURL(`${URL}/?overlay=1`)
   overlayWin.webContents.on('did-finish-load', () => {
@@ -282,14 +282,18 @@ function positionOverlay() {
   overlayWin.setBounds({ x: Math.round(x), y: Math.round(y), width: w, height: h })
 }
 
+let capturing = false // hidden while the scan hotkey captures the screen
 function updateOverlay() {
   if (!overlayWin) return
   const previewing = Date.now() < previewUntil
-  const show = previewing || (appSettings.overlay && (overlayMode === 'pinned' || (overlayMode !== 'hidden' && overlayWant !== 'none')))
+  const show = !capturing && (previewing || (appSettings.overlay && (overlayMode === 'pinned' || (overlayMode !== 'hidden' && overlayWant !== 'none'))))
   if (show) {
     positionOverlay()
     if (!overlayWin.isVisible()) overlayWin.showInactive()
+    // Re-assert on every update (about once a second): a game switching to
+    // fullscreen can push other topmost windows behind it.
     overlayWin.setAlwaysOnTop(true, 'screen-saver')
+    overlayWin.moveTop()
   } else if (overlayWin.isVisible()) {
     overlayWin.hide()
   }
@@ -297,9 +301,9 @@ function updateOverlay() {
 
 ipcMain.on('overlay:want', (e, state, height) => {
   if (!overlayWin || e.sender !== overlayWin.webContents) return
-  if (!['offer', 'info', 'pinned', 'none'].includes(state)) return
-  // A new augment choice brings a hidden overlay back.
-  if (state === 'offer' && overlayWant !== 'offer' && overlayMode === 'hidden') {
+  if (!['offer', 'game', 'info', 'pinned', 'none'].includes(state)) return
+  // A new augment choice, or a new game, brings a hidden overlay back.
+  if (((state === 'offer' && overlayWant !== 'offer') || (state === 'game' && overlayWant === 'none')) && overlayMode === 'hidden') {
     overlayMode = 'auto'
     overlayWin.webContents.send('overlay:mode', overlayMode)
   }
@@ -368,15 +372,25 @@ async function scanNow() {
     overlayMode = 'auto'
     if (overlayWin) overlayWin.webContents.send('overlay:mode', overlayMode)
   }
-  flashOverlay('正在截屏识别强化…')
+  // Out of the picture while the screen is captured (its text would be read too).
+  const wasVisible = !!overlayWin && overlayWin.isVisible()
+  if (wasVisible) {
+    capturing = true
+    updateOverlay()
+    await new Promise((r) => setTimeout(r, 120))
+  }
   try {
     // The first scan of a session also starts the OCR helper: allow it time.
     const r = await postJSON('/api/game/scan', {}, 20000)
+    capturing = false
+    updateOverlay()
     if (r.status === 200) flashOverlay(`识别到：${(r.body.names || []).join(' / ')}，推荐「${r.body.best || ''}」`)
     else if (r.status === 202) flashOverlay(r.body.message || 'AI 正在推断…')
     else flashOverlay(r.body.error || '识别失败')
   } finally {
     scanning = false
+    capturing = false
+    updateOverlay()
     refreshOverlay()
   }
 }

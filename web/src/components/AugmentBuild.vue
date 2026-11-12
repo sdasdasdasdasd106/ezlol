@@ -27,7 +27,8 @@ watch(
   async () => {
     const my = ++seq
     err.value = ''
-    if (!champId.value || !augs.value.length) {
+    // In game the plan works without augments too (all of the champion's games).
+    if (!champId.value || (!augs.value.length && !inGame.value)) {
       data.value = null
       return
     }
@@ -69,14 +70,13 @@ watch(
     <h2>
       强化出装
       <span class="muted sub">
+        <template v-if="inGame && !data?.augments?.length">还没选强化：按这个英雄的所有对局</template>
         <template v-if="data?.augments?.length">根据：{{ data.augments.map((a) => a.name).join(' + ') }}<template v-if="data.plan.games"> · {{ n(data.plan.games) }} 场</template></template>
       </span>
       <button v-if="!inGame && s.augPreview.length" class="sm clear" @click="s.augPreview = []">清除</button>
     </h2>
 
-    <div v-if="!augs.length" class="muted">
-      {{ inGame ? '选了强化之后，这里会按你选的强化和已有装备推荐下一件出什么。' : '点上面强化列表里的任意一个强化，看选了它之后大家怎么出装。' }}
-    </div>
+    <div v-if="!augs.length && !inGame" class="muted">点上面强化列表里的任意一个强化，看选了它之后大家怎么出装。</div>
     <div v-else-if="loading && !data" class="muted">正在加载强化出装数据…</div>
     <div v-else-if="err" class="note">{{ err }}</div>
     <template v-else-if="data">

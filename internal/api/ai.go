@@ -448,8 +448,8 @@ func shortlist(band []ai.OCRLine, names map[string]int) []string {
 	return out
 }
 
-// startTextRead sends the last scan's text to the model (caller holds
-// s.offer.mu). The answer is picked up by the next scan.
+// startTextRead sends a scan's text to the model (caller holds s.offer.mu).
+// The answer is picked up by takeManualAI on the next game poll.
 func (s *Server) startTextRead(lines []screen.Line, names map[string]int, why string) bool {
 	st := &s.offer
 	if st.aiRunning {

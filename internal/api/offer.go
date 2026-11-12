@@ -85,16 +85,11 @@ type offerState struct {
 	pending    int          // level with a pick outstanding, 0 = none
 	pendingAt  time.Time
 	last       *augmentOffer
-	lastScan   time.Time
 	lastGT     float64
 	lastLines  []string
 	picks      []augPick
 	champ      int
 	chosen     int            // slot marked with a hotkey while the current offer is up
-	cand       string         // augment ids of the last scan's possible offer
-	candN      int            // how many scans in a row read that same offer
-	emptyN     int            // scans in a row that read almost no text
-	lastStatus string         // OCR status of the last scan, shown while waiting
 	lastOCR    []screen.Line  // raw lines of the last scan (for the AI text reader)
 	lastNames  map[string]int // display name -> augment id
 	champName  string
@@ -146,7 +141,6 @@ func (s *Server) syncGame(live *liveResponse) (off *augmentOffer, status, why st
 		st.last = nil
 		st.picks = nil
 		st.champ = 0
-		st.cand, st.candN = "", 0
 		st.chosen = 0
 		st.aiManualAt = time.Time{}
 		s.tlog.Log("game", map[string]any{"champion": me.Champion.Name, "championId": me.Champion.ID, "gameTime": live.GameTime, "level": me.Level, "started": live.Started})
@@ -169,14 +163,18 @@ func (s *Server) syncGame(live *liveResponse) (off *augmentOffer, status, why st
 			}
 		}
 	}
-	// A pick that was never seen while the next threshold has been reached:
-	// move on to the newer one (otherwise a later scan would use the old stage).
-	if st.pending != 0 && (st.last == nil || !st.last.Active) {
+	// The next pick level has been reached: an offer still shown is recorded,
+	// a pick never read is skipped (otherwise a scan would use the old stage).
+	if st.pending != 0 {
 		for _, lv := range pickLevels {
 			if lv > st.pending && me.Level >= lv {
-				s.tlog.Log("pick-missed", map[string]any{"level": st.pending, "stage": stageOf(st.pending), "why": "next-level"})
-				st.seenLevel[st.pending] = true
-				st.pending = 0
+				if st.last != nil && st.last.Active {
+					s.closeOffer()
+				} else {
+					s.tlog.Log("pick-missed", map[string]any{"level": st.pending, "stage": stageOf(st.pending), "why": "next-level"})
+					st.seenLevel[st.pending] = true
+					st.pending = 0
+				}
 				break
 			}
 		}
@@ -186,7 +184,6 @@ func (s *Server) syncGame(live *liveResponse) (off *augmentOffer, status, why st
 		for _, lv := range pickLevels {
 			if me.Level >= lv && !st.seenLevel[lv] {
 				st.pending, st.pendingAt = lv, time.Now()
-				st.cand, st.candN = "", 0
 				break
 			}
 		}
@@ -275,13 +272,11 @@ type screenRead struct {
 // Caller holds s.offer.mu.
 func (s *Server) readScreen(ctx context.Context, od *offerData, tag string) (*screenRead, error) {
 	st := &s.offer
-	st.lastScan = time.Now()
 	r := &screenRead{shot: s.tlog.ShotPath(tag, false)}
 	t0 := time.Now()
 	lines, err := s.ocr.ReadDump(ctx, r.shot)
 	r.ms = time.Since(t0).Milliseconds()
 	if err != nil {
-		st.lastStatus = err.Error()
 		return r, err
 	}
 	r.lines = lines
@@ -292,17 +287,6 @@ func (s *Server) readScreen(ctx context.Context, od *offerData, tag string) (*sc
 	}
 	st.lastLines = r.diag
 	st.lastOCR = lines
-	// Nearly no text in the game window several times in a row: the capture is
-	// probably not showing the game (e.g. exclusive fullscreen).
-	if len(lines) < 3 {
-		st.emptyN++
-	} else {
-		st.emptyN = 0
-	}
-	st.lastStatus = "available"
-	if st.emptyN >= 6 {
-		st.lastStatus = "截屏几乎读不到文字，可能没截到游戏画面（全屏下请检查「全屏优化」，或改用无边框）"
-	}
 	r.keys = screen.OfferLayout(screen.Match(lines, od.cands))
 	// A real offer shows 3 cards (4 at most if one is being rerolled); more is a list of names, not a choice.
 	if len(r.keys) > 4 {
@@ -323,21 +307,15 @@ func (r *screenRead) names(od *offerData) []string {
 	return out
 }
 
-// detectOffer decides whether an augment pick is due and, if so, OCRs the
-// game window to identify the offered augments and rank them.
-//
-// Rules learned from real games:
-//   - Only scan once the game has really started (the live API answers during
-//     the loading screen too, whose text can look like augment names).
-//   - An offer counts only after two scans in a row read the same augments, so
-//     a single misread (loading screen, chat, ezlol's own window) is ignored.
-//     The player's scan hotkey skips that wait (see scanNow).
-//   - A pick is recorded when the player presses 1/2/3, or for a confirmed
-//     offer that then closed.
-//   - While a pick is due, keep scanning until it is seen: every 1.5 s for the
-//     first minute (and while dead), then every 3 s. With automatic scanning
-//     off, only the hotkey starts a read; an offer on screen is still watched
-//     so its closing is noticed.
+// offerTTL is how long a read offer stays up without a 1/2/3 mark; then the
+// recommended augment is recorded (a later 1/2/3 still corrects it).
+const offerTTL = 90 * time.Second
+
+// detectOffer reports the augment pick state of the running game. Nothing is
+// captured here: the screen is read only when the player presses the scan
+// hotkey (scanNow). A read offer stays until the player marks the pick with
+// 1/2/3, the next pick level is reached, or offerTTL passes; then the pick is
+// recorded (the recommended one unless marked).
 func (s *Server) detectOffer(ctx context.Context, live *liveResponse) (*augmentOffer, string) {
 	st := &s.offer
 	st.mu.Lock()
@@ -345,114 +323,22 @@ func (s *Server) detectOffer(ctx context.Context, live *liveResponse) (*augmentO
 	if off, status, _, stop := s.syncGame(live); stop {
 		return off, status
 	}
-	me := live.Me
-	// A manual scan handed the cards to the AI: show its answer as soon as it is in.
+	// A scan handed the cards to the AI: show its answer as soon as it is in.
 	if off := s.takeManualAI(ctx, live); off != nil {
-		return off, st.lastStatus
+		return off, "available"
+	}
+	if st.last != nil && st.last.Active {
+		if time.Since(st.last.ScannedAt) > offerTTL {
+			s.closeOffer()
+		} else {
+			s.attachReview(st.last)
+			return st.last, "available"
+		}
 	}
 	if st.pending == 0 {
 		return nil, "available"
 	}
-	stage := stageOf(st.pending)
-	active := st.last != nil && st.last.Active
-	if !active && !s.settings.Get().AutoScan {
-		return &augmentOffer{Pending: true, Level: st.pending, Stage: stage, Lines: st.lastLines}, st.lastStatus
-	}
-	interval := 3 * time.Second
-	if active || me.IsDead || time.Since(st.pendingAt) < time.Minute {
-		interval = 1500 * time.Millisecond
-	}
-	if time.Since(st.lastScan) < interval {
-		if active {
-			s.attachReview(st.last)
-			return st.last, "available"
-		}
-		return &augmentOffer{Pending: true, Level: st.pending, Stage: stage, Lines: st.lastLines}, st.lastStatus
-	}
-	st.lastScan = time.Now()
-	od, err := s.loadOfferData(ctx, live)
-	if err != nil {
-		return &augmentOffer{Pending: true, Level: st.pending, Stage: stage}, err.Error()
-	}
-	rd, err := s.readScreen(ctx, od, fmt.Sprintf("lv%d", st.pending))
-	if err != nil {
-		s.tlog.Log("scan", map[string]any{"mode": "aram", "trigger": "auto", "level": st.pending, "stage": stage, "error": err.Error(), "capture": s.ocr.Capture(), "ms": rd.ms, "gameTime": live.GameTime})
-		if active {
-			s.attachReview(st.last)
-			return st.last, st.lastStatus // keep showing the offer through a failed scan
-		}
-		return &augmentOffer{Pending: true, Level: st.pending, Stage: stage}, st.lastStatus
-	}
-	ids, keys, lines := rd.ids, rd.keys, rd.lines
-	// C: a fresh answer from the AI text reader counts as a confirmed read.
-	aiFresh := !st.aiDone.IsZero() && time.Since(st.aiDone) < 8*time.Second
-	cardText := worthAsking(bandLines(lines)) // the card area still shows card-like text
-	via := "ocr"
-	if len(ids) < 2 && aiFresh && cardText && st.aiChoosing && len(st.aiIDs) >= 2 && len(st.aiIDs) <= 4 {
-		ids, via = append([]int(nil), st.aiIDs...), "ai"
-	}
-	sig := fmt.Sprint(ids)
-	if len(ids) >= 2 && sig == st.cand {
-		st.candN++
-	} else if len(ids) >= 2 {
-		st.cand, st.candN = sig, 1
-	} else {
-		st.cand, st.candN = "", 0
-	}
-	confirmed := len(ids) >= 2 && (via == "ai" || st.candN >= 2 || active)
-	matched := make([]string, 0, len(ids))
-	for _, id := range ids {
-		matched = append(matched, od.byID[id].Name)
-	}
-	s.tlog.Log("scan", map[string]any{"mode": "aram", "trigger": "auto", "level": st.pending, "stage": stage, "dead": me.IsDead, "ms": rd.ms, "gameTime": live.GameTime,
-		"lines": len(lines), "text": rd.diag, "matched": matched, "via": via, "confirmed": confirmed, "shot": rd.shot, "lang": s.ocr.Lang(), "capture": s.ocr.Capture()})
-
-	// C: OCR read Chinese text in the card area but could not match two names
-	// (misread characters): send the text to the AI. Only when the text looks
-	// like cards (startTextRead checks), at most every 8 s, while a pick is due
-	// early on, while dead, after a half read, or to follow an AI-read offer.
-	// About 600 tokens, a small fraction of a US cent.
-	if s.aiOn("text") && len(keys) < 2 && !st.aiRunning && time.Since(st.aiAt) >= 8*time.Second {
-		half := len(keys) == 1
-		following := active && st.last.Via == "ai"
-		if half || following || me.IsDead || time.Since(st.pendingAt) < 90*time.Second {
-			why := "early"
-			switch {
-			case following:
-				why = "follow"
-			case half:
-				why = "half-read"
-			case me.IsDead:
-				why = "dead"
-			}
-			s.startTextRead(lines, od.names, why)
-		}
-	}
-
-	if !confirmed {
-		if active {
-			// Is the confirmed offer gone? OCR offers: two scans without them.
-			// AI-read offers: the AI says no choice is shown (or it went quiet).
-			gone := len(keys) < 2 && time.Since(st.last.ScannedAt) > 3*time.Second
-			if st.last.Via == "ai" {
-				gone = (aiFresh && !st.aiChoosing) || (!cardText && time.Since(st.last.ScannedAt) > 3*time.Second) || time.Since(st.last.ScannedAt) > 40*time.Second
-			}
-			if gone {
-				s.closeOffer()
-				return nil, st.lastStatus
-			}
-			s.attachReview(st.last)
-			return st.last, st.lastStatus
-		}
-		// Give up waiting after a long time so the next threshold can arm.
-		if time.Since(st.pendingAt) > 8*time.Minute {
-			s.tlog.Log("pick-missed", map[string]any{"level": st.pending, "stage": stage})
-			st.seenLevel[st.pending] = true
-			st.pending = 0
-		}
-		return &augmentOffer{Pending: st.pending != 0, Level: st.pending, Stage: stage, Lines: st.lastLines}, st.lastStatus
-	}
-	return s.showOffer(ctx, live, od, ids, via, !active, "auto"), st.lastStatus
+	return &augmentOffer{Pending: true, Level: st.pending, Stage: stageOf(st.pending)}, "available"
 }
 
 // showOffer ranks the cards read on screen and makes them the current offer.
@@ -521,7 +407,6 @@ func (s *Server) closeOffer() {
 	}
 	st.pending = 0
 	st.last = nil
-	st.cand, st.candN = "", 0
 }
 
 // manualLevel is the pick a scan hotkey press is for when none is due: the
@@ -537,11 +422,11 @@ func manualLevel(level int) int {
 }
 
 // scanNow: POST /api/game/scan — the player pressed the "read the augments
-// now" hotkey (or the button in the window). One capture, and two or more
-// names on screen count straight away: the player says the choice is open,
-// so the second confirming read of the automatic scan is not needed. When
-// the names cannot be matched and AI option C is on, the text goes to the AI
-// and its answer becomes the offer (see takeManualAI).
+// now" hotkey (or the button in the window). This is the only time the
+// screen is captured. One capture, and two or more names on screen count
+// straight away: the player says the choice is open. When the names cannot
+// be matched and AI option C is on, the text goes to the AI and its answer
+// becomes the offer (see takeManualAI).
 func (s *Server) scanNow(w http.ResponseWriter, r *http.Request) {
 	live, err := s.liveState(r.Context())
 	if err != nil {
@@ -561,7 +446,6 @@ func (s *Server) scanNow(w http.ResponseWriter, r *http.Request) {
 	}
 	if st.pending == 0 {
 		st.pending, st.pendingAt = manualLevel(live.Me.Level), time.Now()
-		st.cand, st.candN = "", 0
 	}
 	stage := stageOf(st.pending)
 	od, err := s.loadOfferData(r.Context(), live)
@@ -582,7 +466,6 @@ func (s *Server) scanNow(w http.ResponseWriter, r *http.Request) {
 	if ok {
 		sig := fmt.Sprint(rd.ids)
 		fresh := st.last == nil || !st.last.Active || st.last.sig != sig
-		st.cand, st.candN = sig, 2
 		off := s.showOffer(r.Context(), live, od, rd.ids, "ocr", fresh, "manual")
 		writeJSON(w, 200, map[string]any{"status": "ok", "best": off.Best, "names": names, "ms": rd.ms})
 		return

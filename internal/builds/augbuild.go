@@ -199,6 +199,11 @@ func PlanAugBuild(d *ddragon.Data, ch *AKChampion, abs map[int]*AKAugmentBuild, 
 			}
 		}
 	}
+	// No augment taken yet: plan from all of the champion's games.
+	if len(augs) == 0 && ch != nil && len(ch.Builds) > 0 {
+		use = append(use, &AKAugmentBuild{Games: ch.Games, Items: ch.Items, Builds: ch.Builds})
+		out.Games = ch.Games
+	}
 	if len(use) == 0 {
 		return out
 	}

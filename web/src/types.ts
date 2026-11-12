@@ -212,7 +212,6 @@ export interface ChampionInfo {
 }
 export interface SettingsView {
   ocr: boolean
-  autoScan: boolean
   ocrAvailable: boolean
   ocrLang: string
   updateCheck: boolean
@@ -256,5 +255,4 @@ export interface Game {
   ocr: string
   ocrLang: string
   research?: Research
-  autoScan?: boolean // false: augments are read only when the player presses the scan hotkey
 }

@@ -84,7 +84,7 @@ declare global {
       onGameRefresh?: (fn: () => void) => void
       /** Only inside the overlay window. */
       overlay?: {
-        want: (state: 'offer' | 'info' | 'pinned' | 'none', height: number) => void
+        want: (state: 'offer' | 'game' | 'info' | 'pinned' | 'none', height: number) => void
         onMode: (fn: (m: 'auto' | 'pinned' | 'hidden') => void) => void
         onHotkeys: (fn: (h: Hotkeys) => void) => void
         onFlash: (fn: (text: string) => void) => void

@@ -125,7 +125,7 @@ watch(
     <div v-if="scanMsg" class="note">{{ scanMsg }}</div>
 
     <div v-if="!game?.inGame" class="muted">
-      进入海克斯乱斗后，这里会自动识别屏幕上的强化选项并告诉你选哪个。
+      进入海克斯乱斗后，强化选择界面打开时按 {{ scanKey }}（或点这里的「立即识别」），这里会告诉你选哪个。
     </div>
     <div v-else-if="mode !== 'aram'" class="muted">这不是海克斯乱斗对局，没有强化可选。</div>
     <template v-else>
@@ -164,10 +164,10 @@ watch(
       </div>
       <div v-else-if="offer?.waiting" class="muted">还在加载画面，进入游戏后开始识别。</div>
       <div v-else-if="offer?.pending" class="wait">
-        {{ offer.level <= 1 ? '开局' : `${offer.level} 级` }}的强化待选——打开选择界面后按 <b>{{ scanKey }}</b> 立即识别<template v-if="game?.autoScan !== false">，不按也会自动识别（要等几秒）</template>。
+        {{ offer.level <= 1 ? '开局' : `${offer.level} 级` }}的强化待选——打开选择界面后按 <b>{{ scanKey }}</b> 立即识别。
       </div>
       <div v-else class="muted">
-        开局和 7 / 11 / 15 级时会出现强化选择，打开后按 <b>{{ scanKey }}</b> 立即识别<template v-if="game?.autoScan !== false">（不按也会自动识别）</template>。
+        开局和 7 / 11 / 15 级时会出现强化选择，打开后按 <b>{{ scanKey }}</b> 立即识别。
       </div>
 
       <!-- Augments taken so far; an assumed one can be corrected -->
