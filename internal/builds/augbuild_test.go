@@ -228,16 +228,3 @@ func TestPlanFallsBackToChampionRoutes(t *testing.T) {
 		t.Fatalf("direction: %+v", dir)
 	}
 }
-
-// No augment taken yet (start of a game): the plan uses the champion's own builds.
-func TestPlanWithoutAugments(t *testing.T) {
-	d, ch, abs := fixture()
-	if p := PlanAugBuild(d, ch, abs, nil, nil); len(p.Cores) != 0 {
-		t.Fatalf("champion without builds should give no plan: %+v", p.Cores)
-	}
-	ch.Builds = abs[100].Builds
-	p := PlanAugBuild(d, ch, abs, nil, nil)
-	if len(p.Cores) == 0 || p.Cores[0].Items[0].ID == 0 {
-		t.Fatalf("no cores from the champion's builds: %+v", p)
-	}
-}

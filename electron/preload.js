@@ -7,27 +7,17 @@ contextBridge.exposeInMainWorld('ezlol', {
   onUpdate: (fn) => ipcRenderer.on('update-state', (_e, st) => fn(st)),
   installUpdate: () => ipcRenderer.invoke('install-update'),
   checkUpdate: () => ipcRenderer.invoke('check-update'),
-  // Desktop settings (login item, tray) live in the main process.
+  // Desktop settings (login item, tray, voice, hotkeys) live in the main process.
   getAppSettings: () => ipcRenderer.invoke('app-settings:get'),
   setAppSettings: (patch) => ipcRenderer.invoke('app-settings:set', patch && typeof patch === 'object' ? patch : {}),
   onAppSettings: (fn) => ipcRenderer.on('app-settings', (_e, s) => fn(s)),
-  previewOverlay: () => ipcRenderer.invoke('overlay:preview'),
   // Global hotkeys are let go while Settings records a new one.
   suspendHotkeys: (on) => ipcRenderer.invoke('hotkeys:suspend', !!on),
   resetHotkeys: () => ipcRenderer.invoke('hotkeys:defaults'),
   testVoice: () => ipcRenderer.invoke('voice:test'),
   // A hotkey changed the game state (scan, pick): poll now instead of waiting.
   onGameRefresh: (fn) => ipcRenderer.on('game:refresh', () => fn()),
-  // Used by the always-on-top overlay window only.
-  overlay: {
-    want: (state, height) => ipcRenderer.send('overlay:want', String(state), Number(height) || 0),
-    onMode: (fn) => ipcRenderer.on('overlay:mode', (_e, m) => fn(m)),
-    onHotkeys: (fn) => ipcRenderer.on('overlay:hotkeys', (_e, h) => fn(h)),
-    onFlash: (fn) => ipcRenderer.on('overlay:flash', (_e, t, say) => fn(String(t), !!say)),
-    onVoice: (fn) => ipcRenderer.on('overlay:voice', (_e, on) => fn(!!on)),
-    onSay: (fn) => ipcRenderer.on('overlay:say', (_e, t, force) => fn(String(t), !!force)),
-    onSpeakBuild: (fn) => ipcRenderer.on('overlay:speak-build', () => fn()),
-    onPreview: (fn) => ipcRenderer.on('overlay:preview', () => fn()),
-    onRefresh: (fn) => ipcRenderer.on('overlay:refresh', () => fn()),
-  },
+  // What a hotkey did, to show (and speak when say is set).
+  onHotkeyResult: (fn) => ipcRenderer.on('hotkey:result', (_e, text, say) => fn(String(text), !!say)),
+  onSay: (fn) => ipcRenderer.on('voice:say', (_e, text, force) => fn(String(text), !!force)),
 })

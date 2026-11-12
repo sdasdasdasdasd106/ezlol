@@ -34,11 +34,10 @@ const LOBBY: Record<string, Pos> = {
 export const DEFAULT_LAYOUTS: Record<ModeKey, Record<string, Pos>> = {
   idle: LOBBY,
   select: LOBBY,
+  // In game only two boxes: the augment recommendation, then the build that
+  // follows from the augments taken.
   game: {
-    'augment-assist': P(0, 0, 6, 14), 'aug-build': P(6, 0, 6, 14),
-    items: P(0, 14, 3, 12), boots: P(3, 14, 3, 12),
-    'aug-prismatic': P(6, 14, 3, 10), 'aug-gold': P(9, 14, 3, 10), 'aug-silver': P(6, 24, 3, 10),
-    'ai-strategy': P(0, 26, 6, 10),
+    'augment-assist': P(0, 0, 12, 9), 'aug-build': P(0, 9, 12, 12),
   },
 }
 
@@ -62,7 +61,10 @@ const COMMON: WidgetSpec[] = [
 export const CATALOG: Record<ModeKey, WidgetSpec[]> = {
   idle: COMMON,
   select: COMMON,
-  game: [{ id: 'augment-assist', title: '强化推荐', w: 6, h: 14 }, ...COMMON],
+  game: [
+    { id: 'augment-assist', title: '强化推荐', w: 12, h: 9 },
+    { id: 'aug-build', title: '按强化出装', w: 12, h: 12 },
+  ],
 }
 
 const COLUMNS = 12
@@ -107,7 +109,24 @@ function saveJSON(key: string, l: Layouts) {
     /* ignore */
   }
 }
-const loadLayouts = () => loadJSON(STORE)
+// The game screen was redone (two boxes): drop its arrangements saved before.
+const GAME_V = 'ezlol.layout.game.v2'
+function loadLayouts(): Layouts {
+  const l = loadJSON(STORE)
+  try {
+    if (!localStorage.getItem(GAME_V)) {
+      delete l.game
+      const pre = loadJSON(PRESET)
+      delete pre.game
+      saveJSON(PRESET, pre)
+      saveJSON(STORE, l)
+      localStorage.setItem(GAME_V, '1')
+    }
+  } catch {
+    /* storage unavailable */
+  }
+  return l
+}
 const saveLayouts = (l: Layouts) => saveJSON(STORE, l)
 
 /**

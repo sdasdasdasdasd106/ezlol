@@ -27,8 +27,7 @@ watch(
   async () => {
     const my = ++seq
     err.value = ''
-    // In game the plan works without augments too (all of the champion's games).
-    if (!champId.value || (!augs.value.length && !inGame.value)) {
+    if (!champId.value || !augs.value.length) {
       data.value = null
       return
     }
@@ -68,15 +67,16 @@ watch(
 <template>
   <Widget v-if="show" id="aug-build" :w="6">
     <h2>
-      强化出装
+      {{ inGame ? '按强化出装' : '强化出装' }}
       <span class="muted sub">
-        <template v-if="inGame && !data?.augments?.length">还没选强化：按这个英雄的所有对局</template>
         <template v-if="data?.augments?.length">根据：{{ data.augments.map((a) => a.name).join(' + ') }}<template v-if="data.plan.games"> · {{ n(data.plan.games) }} 场</template></template>
       </span>
       <button v-if="!inGame && s.augPreview.length" class="sm clear" @click="s.augPreview = []">清除</button>
     </h2>
 
-    <div v-if="!augs.length && !inGame" class="muted">点上面强化列表里的任意一个强化，看选了它之后大家怎么出装。</div>
+    <div v-if="!augs.length" class="muted">
+      {{ inGame ? '选了强化之后，这里按你的强化和已有装备推荐出装。' : '点上面强化列表里的任意一个强化，看选了它之后大家怎么出装。' }}
+    </div>
     <div v-else-if="loading && !data" class="muted">正在加载强化出装数据…</div>
     <div v-else-if="err" class="note">{{ err }}</div>
     <template v-else-if="data">
@@ -86,7 +86,7 @@ watch(
       <div class="cols">
         <div>
           <h3>{{ inGame ? `下一件（第 ${data.plan.slot} 件）` : '第 1 件选什么' }}</h3>
-          <div class="basis muted">{{ BASIS[data.plan.basis] ?? '' }}</div>
+          <div v-if="!inGame" class="basis muted">{{ BASIS[data.plan.basis] ?? '' }}</div>
           <div v-if="!data.plan.next?.length" class="muted">样本不够，没有可靠推荐。</div>
           <div v-for="(x, i) in data.plan.next ?? []" :key="x.item.id" class="row" :class="{ top: i === 0 }">
             <img :src="x.item.image" :alt="x.item.name" />
@@ -121,7 +121,7 @@ watch(
           </div>
         </div>
       </div>
-      <div class="foot muted">下一件的 +/− 对比的是这个英雄第 {{ data.plan.slot }} 件装备的平均胜率（{{ pct(data.plan.slotBase) }}）。数据：aramkit · {{ data.version }}</div>
+      <div v-if="!inGame" class="foot muted">下一件的 +/− 对比的是这个英雄第 {{ data.plan.slot }} 件装备的平均胜率（{{ pct(data.plan.slotBase) }}）。数据：aramkit · {{ data.version }}</div>
     </template>
   </Widget>
 </template>

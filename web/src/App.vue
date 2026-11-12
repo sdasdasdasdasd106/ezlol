@@ -15,6 +15,7 @@ import Toasts from './components/Toasts.vue'
 import ThemeMenu from './components/ThemeMenu.vue'
 import type { ThemeOption } from './components/ThemeMenu.vue'
 import { toast } from './toast'
+import { say, setVoice, useGameVoice } from './voice'
 import type { UpdateInfo } from './types'
 
 const params = new URLSearchParams(location.search)
@@ -125,6 +126,16 @@ async function pollGame() {
 }
 // A hotkey (scan, pick) changed the game state: show it now.
 window.ezlol?.onGameRefresh?.(() => void pollGame())
+// What a hotkey did: a toast for when the player switches out, spoken if asked.
+window.ezlol?.onHotkeyResult?.((text, speak) => {
+  toast({ key: 'hotkey', kind: speak ? 'error' : 'info', title: text, ttl: 8000 })
+  if (speak) say(text.split(/[（(]/)[0].slice(0, 40), { interrupt: true })
+})
+// Optional voice (Settings): the recommendation and the next item, spoken.
+window.ezlol?.getAppSettings?.().then((a) => setVoice(!!a.voice)).catch(() => {})
+window.ezlol?.onAppSettings?.((a) => setVoice(!!a.voice))
+window.ezlol?.onSay?.((text, force) => say(text, { interrupt: true, force }))
+useGameVoice(game, async (champ, augs, owned) => (await api.augmentBuild(champ, augs, owned)).plan.next?.[0]?.item.name ?? '')
 
 onMounted(async () => {
   try {
@@ -232,11 +243,11 @@ function select(c: Champion) {
 
     <div class="layout" :class="mode">
       <div ref="mainEl" :key="modeKey + ':' + layoutVersion" class="main grid-stack" :class="[mode, { editing }]">
-        <!-- In game (ARAM / Arena): the augment assistant first, build boxes after it -->
+        <!-- In game: the augment recommendation, then the build for the augments taken -->
         <AugmentAssist v-if="mode === 'game'" :game="game" @picks="(p) => game && (game.picks = p)" @refresh="pollGame" />
         <AugmentBuild :game="game" />
-        <BuildPanel :compact="mode === 'game'" />
-        <StrategyCard :game="game" :champion="selected" />
+        <BuildPanel v-if="mode !== 'game'" />
+        <StrategyCard v-if="mode !== 'game'" :game="game" :champion="selected" />
         <GhostWidget v-for="g in ghosts" :key="'ghost-' + g.id" :spec="g" />
       </div>
     </div>

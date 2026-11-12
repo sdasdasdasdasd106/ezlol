@@ -1,53 +1,53 @@
 <script setup lang="ts">
-// In-game augment assistant: the augments on screen (read by OCR), best first,
-// each with the numbers behind it; the augments taken so far (the recommended
-// one is assumed, one click corrects it). Pops a toast and chimes on an offer.
+// In-game augment recommendation. The game runs in exclusive fullscreen, so
+// the player presses the scan hotkey, switches out (Alt+Tab) and reads it here:
+// the cards in screen order (left to right = hotkeys 1/2/3), the recommended
+// one marked, and for each card the build that goes with it. Below, the
+// augments taken so far (an assumed one can be corrected with a click).
 import { computed, ref, watch } from 'vue'
 import Widget from './Widget.vue'
 import * as sound from '../sound'
 import { api, DEFAULT_HOTKEYS, prettyHotkey } from '../api'
-import { dismissKey, toast } from '../toast'
+import { toast } from '../toast'
+import { place } from '../voice'
 import type { AugPick, Game, OfferCard } from '../types'
 
 const props = defineProps<{ game: Game | null }>()
 const emit = defineEmits<{ picks: [p: AugPick[]]; refresh: [] }>()
 
-const offer = computed(() => props.game?.offer)
+const offer = computed(() => (props.game?.offer?.active && props.game.offer.offered?.length ? props.game.offer : null))
 const mode = computed(() => props.game?.mode ?? '')
 const picks = computed(() => props.game?.picks ?? [])
 const STAGE = ['', '开局', '7 级', '11 级', '15 级']
-const STYLE: Record<string, string> = { crit: '暴击流', on_hit: '攻速特效流', ap: '法强流', hybrid: '混伤流', lethality: '穿甲流', tank: '坦克流', bruiser: '战士流', ad: '物理流' }
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`
 const signed = (x: number) => `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}%`
-const tierLabel = (t?: number) => (t ? ['', 'S', 'A', 'B', 'C', 'D'][t] ?? '?' : '')
-const statLine = (c: OfferCard) =>
-  c.stageGames ? `胜率 ${pct(c.stageWinRate)} · 比平均 ${signed(c.lift)} · ${c.stageGames >= 10000 ? (c.stageGames / 10000).toFixed(1) + ' 万' : c.stageGames} 场` : '暂无数据'
 
-// What the scanner is doing, in words.
-const scanNote = computed(() => {
-  const g = props.game
-  if (!g?.inGame) return ''
-  switch (g.ocr) {
-    case 'available':
-    case '':
-      return ''
-    case 'disabled':
-      return '屏幕识别已在设置里关闭。'
-    case 'unavailable':
-      return '这台电脑上用不了屏幕识别，只能看下面按胜率排好的强化列表。'
-    default:
-      return `屏幕识别：${g.ocr}`
-  }
+// Cards in screen order, so the 1/2/3 hotkeys and "left / middle / right" match.
+const cards = computed<OfferCard[]>(() => {
+  const o = offer.value
+  if (!o?.offered) return []
+  const by = new Map(o.offered.map((c) => [c.id, c]))
+  const order = o.screen?.length ? o.screen : o.offered.map((c) => c.id)
+  return order.map((id) => by.get(id)).filter(Boolean) as OfferCard[]
 })
-const langWarn = computed(() => {
-  const l = props.game?.ocrLang ?? ''
-  return l && !l.startsWith('zh') ? `识别语言是 ${l}，认不出中文强化名：请在 Windows 设置里安装「中文(简体)」的光学字符识别，然后重启 ezlol。` : ''
+const bestId = computed(() => offer.value?.offered?.[0]?.id)
+const bestPlace = computed(() => place(cards.value.findIndex((c) => c.id === bestId.value), cards.value.length))
+const warn = (r: string) => r.startsWith('注意') || r.startsWith('和你现在的装备不太搭')
+// The win-rate line is shown as numbers; the build line is shown as icons.
+const reasonsOf = (c: OfferCard) => c.reasons.slice(1).filter((r) => !r.startsWith('推荐核心')).slice(0, 2)
+const aiPick = (name: string) => offer.value?.ai?.status === 'done' && !offer.value.ai.agree && offer.value.ai.pick === name
+
+// Hotkeys, for the hints.
+const keys = ref({ ...DEFAULT_HOTKEYS })
+window.ezlol?.getAppSettings?.().then((a) => (keys.value = a.hotkeys)).catch(() => {})
+window.ezlol?.onAppSettings?.((a) => (keys.value = a.hotkeys))
+const scanKey = computed(() => prettyHotkey(keys.value.scan))
+const pickKeys = computed(() => {
+  const [a, b, c] = [keys.value.pick1, keys.value.pick2, keys.value.pick3].map(prettyHotkey)
+  return a.endsWith('1') && b === a.slice(0, -1) + '2' && c === a.slice(0, -1) + '3' ? `${a}/2/3` : `${a} / ${b} / ${c}`
 })
 
-// "Read it now": the same as the scan hotkey, for a second screen or a windowed game.
-const scanKey = ref(prettyHotkey(DEFAULT_HOTKEYS.scan))
-window.ezlol?.getAppSettings?.().then((a) => (scanKey.value = prettyHotkey(a.hotkeys.scan))).catch(() => {})
-window.ezlol?.onAppSettings?.((a) => (scanKey.value = prettyHotkey(a.hotkeys.scan)))
+// The same as the scan hotkey, for a windowed game or a second screen.
 const scanning = ref(false)
 const scanMsg = ref('')
 async function scanNow() {
@@ -65,6 +65,15 @@ async function scanNow() {
 }
 const canScan = computed(() => !!props.game?.inGame && mode.value === 'aram' && !props.game?.offer?.waiting && !['unavailable', 'disabled'].includes(props.game?.ocr ?? ''))
 
+const scanNote = computed(() => {
+  const g = props.game
+  if (!g?.inGame) return ''
+  if (g.ocr === 'disabled') return '屏幕识别已在设置里关闭。'
+  if (g.ocr === 'unavailable') return '这台电脑上用不了屏幕识别。'
+  const l = g.ocrLang ?? ''
+  return l && !l.startsWith('zh') ? `识别语言是 ${l}，认不出中文强化名：请在 Windows 设置里安装「中文(简体)」的光学字符识别，然后重启 ezlol。` : ''
+})
+
 // Correcting an assumed pick.
 const fixing = ref<number | null>(null)
 async function correct(p: AugPick, id: number) {
@@ -78,105 +87,70 @@ async function correct(p: AugPick, id: number) {
   }
 }
 
-// The AI's pick, marked on its card when it differs from the statistics' pick.
-const aiPick = (name: string) => {
-  const r = offer.value?.ai
-  return r?.status === 'done' && !r.agree && r.pick === name
-}
-
-let pinged = false
-let announced = 0
-watch(offer, (off) => {
-  if (off?.active && off.offered?.length) {
-    if (!pinged) {
-      pinged = true
-      sound.alert()
-    }
-    toast({ key: 'offer', kind: 'pick', sticky: true, title: `选强化 · 推荐「${off.best}」`, body: [off.why, off.note].filter(Boolean).join(' '), cards: off.offered ?? [] })
-  } else if (pinged) {
-    pinged = false
-    dismissKey('offer')
-  }
-})
-// After an offer closes, say what was recorded so a wrong guess gets noticed.
+// A chime when a recommendation comes in.
 watch(
-  () => picks.value.length,
-  (n) => {
-    const p = picks.value[n - 1]
-    if (!p || n <= announced) return
-    announced = n
-    if (p.assumed) toast({ key: 'pick', kind: 'info', title: `已记为选了「${p.name}」`, body: '如果你选的是别的，在「强化推荐」面板里点它改掉，出装会跟着变。', ttl: 9000 })
-  },
-)
-watch(
-  () => props.game?.inGame,
-  (v) => {
-    if (!v) announced = 0
+  () => (offer.value ? `${offer.value.scannedAt ?? ''}|${offer.value.screen?.join(',') ?? ''}` : ''),
+  (k) => {
+    if (k) sound.alert()
   },
 )
 </script>
 
 <template>
-  <Widget id="augment-assist" :w="6">
+  <Widget id="augment-assist" :w="12">
     <h2>
       强化推荐 <span v-if="game?.me" class="muted sub">{{ game.me.champion.name }} · {{ game.me.level }} 级</span>
       <button v-if="canScan" class="sm scan" :disabled="scanning" :title="`截屏识别现在屏幕上的强化（游戏里按 ${scanKey}）`" @click="scanNow">{{ scanning ? '识别中…' : '立即识别' }}</button>
     </h2>
     <div v-if="scanMsg" class="note">{{ scanMsg }}</div>
 
-    <div v-if="!game?.inGame" class="muted">
-      进入海克斯乱斗后，强化选择界面打开时按 {{ scanKey }}（或点这里的「立即识别」），这里会告诉你选哪个。
-    </div>
+    <div v-if="!game?.inGame" class="muted">进入海克斯乱斗后，选强化时按 <b>{{ scanKey }}</b>，切出来在这里看推荐。</div>
     <div v-else-if="mode !== 'aram'" class="muted">这不是海克斯乱斗对局，没有强化可选。</div>
     <template v-else>
-      <div v-if="offer?.active && offer.offered?.length" class="pick">
-        <div class="take">选「{{ offer.best }}」<span v-if="offer.stage" class="why">{{ STAGE[offer.stage] }}强化</span></div>
+      <template v-if="offer">
+        <div class="take">选{{ bestPlace }}的「{{ offer.best }}」<span class="why">{{ STAGE[offer.stage] }}强化</span></div>
         <div v-if="offer.note" class="gap">{{ offer.note }}</div>
-        <div v-if="offer.ai" class="ai" :class="[offer.ai.status, { agree: offer.ai.agree }]">
-          <template v-if="offer.ai.status === 'pending'">AI 正在复核这次选择…</template>
-          <template v-else-if="offer.ai.status === 'error'">AI 复核失败：{{ offer.ai.error }}</template>
-          <template v-else>
-            <b>{{ offer.ai.agree ? 'AI 同意' : `AI 建议改选「${offer.ai.pick}」` }}</b><span v-if="offer.ai.confidence" class="conf">把握{{ offer.ai.confidence }}</span>：{{ offer.ai.reason }}
-          </template>
+        <div v-if="offer.ai && offer.ai.status !== 'error'" class="ai" :class="[offer.ai.status, { agree: offer.ai.agree }]">
+          <template v-if="offer.ai.status === 'pending'">AI 正在复核…</template>
+          <template v-else><b>{{ offer.ai.agree ? 'AI 同意' : `AI 建议改选「${offer.ai.pick}」` }}</b>：{{ offer.ai.reason }}</template>
         </div>
-        <div v-if="offer.via === 'ai'" class="gap">这组强化是 AI 根据识别出的文字推断的，可能不准；不对的话选完按快捷键记下选的第几个。</div>
+        <div v-if="offer.via === 'ai'" class="gap">这组强化是 AI 根据识别出的文字推断的，可能不准。</div>
         <div class="cards">
-          <div v-for="(a, i) in offer.offered" :key="a.id" class="card" :class="[a.rarity, { best: i === 0 }]" :title="a.desc">
+          <div v-for="(a, i) in cards" :key="a.id" class="card" :class="[a.rarity, { best: a.id === bestId, chosen: offer.chosen === i + 1 }]" :title="a.desc">
             <div class="head">
               <img v-if="a.icon" :src="a.icon" :alt="a.name" /><span v-else class="noicon" />
               <div class="body">
-                <div class="n"><span v-if="tierLabel(a.tier)" class="tp" :class="'t' + a.tier">{{ tierLabel(a.tier) }}</span>{{ a.name }}<span v-if="i === 0" class="rec">推荐</span><span v-if="aiPick(a.name)" class="rec aipick">AI</span></div>
-                <div class="s">{{ statLine(a) }}</div>
+                <div class="n">
+                  <span class="slot">{{ i + 1 }}</span>{{ a.name }}
+                  <span v-if="a.id === bestId" class="rec">推荐</span><span v-if="aiPick(a.name)" class="rec aipick">AI</span>
+                </div>
+                <div class="s">{{ a.stageGames ? `胜率 ${pct(a.stageWinRate)}（比平均 ${signed(a.lift)}）` : '数据少' }}</div>
               </div>
             </div>
-            <ul class="reasons">
-              <li v-for="(r, j) in a.reasons" :key="j" :class="{ warn: r.startsWith('注意') || r.startsWith('和你现在的装备不太搭') }">{{ r }}</li>
+            <ul v-if="reasonsOf(a).length" class="reasons">
+              <li v-for="(r, j) in reasonsOf(a)" :key="j" :class="{ warn: warn(r) }">{{ r }}</li>
             </ul>
-            <div v-if="a.core" class="core" :title="`选它之后最常见的核心出装（${STYLE[a.core.style] ?? a.core.style}）`">
+            <div v-if="a.core" class="core">
+              <span class="lab">选它后出装</span>
               <template v-for="(it, j) in a.core.items" :key="it.id">
                 <span v-if="j" class="arrow">›</span><img v-if="it.image" :src="it.image" :title="it.name" :alt="it.name" /><span v-else class="noimg">{{ it.name || it.id }}</span>
               </template>
               <img v-if="a.core.boots?.image" :src="a.core.boots.image" :title="a.core.boots.name" class="boots" />
             </div>
-            <div class="d">{{ a.desc }}</div>
           </div>
         </div>
-      </div>
-      <div v-else-if="offer?.waiting" class="muted">还在加载画面，进入游戏后开始识别。</div>
-      <div v-else-if="offer?.pending" class="wait">
-        {{ offer.level <= 1 ? '开局' : `${offer.level} 级` }}的强化待选——打开选择界面后按 <b>{{ scanKey }}</b> 立即识别。
-      </div>
-      <div v-else class="muted">
-        开局和 7 / 11 / 15 级时会出现强化选择，打开后按 <b>{{ scanKey }}</b> 立即识别。
-      </div>
+        <div class="hint muted">选完按 {{ pickKeys }}（左 / 中 / 右）记下选的是哪个，下面的出装会按它推荐；不按就记为推荐的那个。</div>
+      </template>
+      <div v-else-if="game?.offer?.waiting" class="muted">还在加载画面。</div>
+      <div v-else-if="game?.offer?.pending" class="wait">{{ STAGE[game.offer.stage] }}强化待选：选择界面打开后按 <b>{{ scanKey }}</b>，再切出来看。</div>
+      <div v-else class="muted">开局和 7 / 11 / 15 级选强化时，按 <b>{{ scanKey }}</b> 识别。</div>
 
-      <!-- Augments taken so far; an assumed one can be corrected -->
       <div v-if="picks.length" class="picks">
         <span class="muted">已选：</span>
         <span v-for="p in picks" :key="p.stage" class="chip" :class="[p.rarity, { assumed: p.assumed }]">
           <img v-if="p.icon" :src="p.icon" alt="" />
           <span>{{ STAGE[p.stage] }} {{ p.name }}</span>
-          <button class="sm" :title="p.assumed ? '这是按推荐自动记录的；选的不是它就点这里改' : '改成其他选项'" @click="fixing = fixing === p.stage ? null : p.stage">{{ p.assumed ? '不对？' : '改' }}</button>
+          <button class="sm" :title="p.assumed ? '这是按推荐记的；选的不是它就点这里改' : '改成其他选项'" @click="fixing = fixing === p.stage ? null : p.stage">{{ p.assumed ? '不对？' : '改' }}</button>
           <span v-if="fixing === p.stage" class="fix">
             <button v-for="o in p.offered" :key="o.id" class="sm" :class="{ active: o.id === p.augmentId }" @click="correct(p, o.id)">{{ o.name }}</button>
             <button class="sm danger" title="这条记录是错的（其实没选过）：删掉它" @click="correct(p, 0)">删除</button>
@@ -184,7 +158,6 @@ watch(
         </span>
       </div>
       <div v-if="scanNote" class="note">{{ scanNote }}</div>
-      <div v-if="langWarn" class="note">{{ langWarn }}</div>
     </template>
   </Widget>
 </template>
@@ -221,6 +194,10 @@ h2 .scan { margin-left: auto; float: right; text-transform: none; letter-spacing
 .core img { width: 26px; height: 26px; border: 1px solid var(--gold-deep); background: #000; }
 .core img.boots { margin-left: 6px; }
 .core .arrow { color: var(--muted); }
+.core .lab { font-size: 11px; color: var(--muted); margin-right: 4px; }
+.slot { font-family: var(--display); font-size: 12px; width: 18px; height: 18px; display: inline-grid; place-items: center; border: 1px solid var(--gold-deep); color: var(--gold); }
+.card.chosen { outline: 2px solid #f0d48a; }
+.hint { margin-top: 8px; font-size: 12px; }
 .d { font-size: 11px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .tp { font-family: var(--display); font-size: 10px; width: 16px; height: 16px; display: grid; place-items: center; border: 1px solid var(--gold-deep); color: var(--muted); }
 .tp.t1 { color: #ff8a3d; border-color: #ff8a3d; } .tp.t2 { color: var(--gold); border-color: var(--gold); } .tp.t3 { color: var(--hextech-2); border-color: var(--hextech-dim); }

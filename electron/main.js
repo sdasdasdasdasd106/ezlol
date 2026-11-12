@@ -1,5 +1,5 @@
 'use strict'
-const { app, BrowserWindow, shell, Menu, ipcMain, Notification, Tray, nativeImage, globalShortcut, screen } = require('electron')
+const { app, BrowserWindow, shell, Menu, ipcMain, Notification, Tray, nativeImage, globalShortcut } = require('electron')
 const { spawn } = require('node:child_process')
 const path = require('node:path')
 const fs = require('node:fs')
@@ -31,19 +31,17 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => showWindow())
 }
 
-// ---- Desktop settings: login item, tray, overlay, hotkeys ----
+// ---- Desktop settings: login item, tray, voice, hotkeys ----
 // Ctrl+Alt, not Ctrl+Shift: on Chinese Windows Ctrl+Shift switches the input
 // method / keyboard layout, so in game it could leave an IME on and swallow
 // skill keys. Ctrl+<digit> are League emotes, Alt+<digit> self-cast items.
-const HOTKEY_DEFAULTS = { scan: 'CommandOrControl+Alt+S', pick1: 'CommandOrControl+Alt+1', pick2: 'CommandOrControl+Alt+2', pick3: 'CommandOrControl+Alt+3', build: 'CommandOrControl+Alt+B', toggle: 'CommandOrControl+Alt+H' }
+const HOTKEY_DEFAULTS = { scan: 'CommandOrControl+Alt+S', pick1: 'CommandOrControl+Alt+1', pick2: 'CommandOrControl+Alt+2', pick3: 'CommandOrControl+Alt+3' }
 // Defaults of earlier versions: saved settings still holding them move to the new ones.
-const OLD_HOTKEY_DEFAULTS = { pick1: 'CommandOrControl+Shift+1', pick2: 'CommandOrControl+Shift+2', pick3: 'CommandOrControl+Shift+3', toggle: 'CommandOrControl+Shift+H' }
-const OVERLAY_POSITIONS = ['bottom-left', 'top-left', 'left-middle', 'top-right', 'bottom-right']
-// overlayDisplay: auto = a second screen if there is one, none with a single
-// screen (an exclusive-fullscreen game covers every window on its screen);
-// primary = the game's screen (only visible with borderless / windowed);
-// or a display id. voice: speak recommendations (works over any game).
-const APP_SETTINGS_DEFAULTS = { launchAtLogin: false, startInTray: false, overlay: true, overlayPos: 'bottom-left', overlayDisplay: 'auto', voice: true, hotkeys: HOTKEY_DEFAULTS }
+const OLD_HOTKEY_DEFAULTS = { pick1: 'CommandOrControl+Shift+1', pick2: 'CommandOrControl+Shift+2', pick3: 'CommandOrControl+Shift+3' }
+// voice: speak the recommendation (optional; League runs in exclusive
+// fullscreen, so nothing can be shown over it: the player switches out to the
+// window, or listens).
+const APP_SETTINGS_DEFAULTS = { launchAtLogin: false, startInTray: false, voice: false, hotkeys: HOTKEY_DEFAULTS }
 const appSettingsPath = () => path.join(app.getPath('userData'), 'app-settings.json')
 
 /**
@@ -98,7 +96,9 @@ function loadAppSettings() {
       const n = normalizeHotkey(v)
       if (n) hk[k] = n
     }
-    return { ...APP_SETTINGS_DEFAULTS, ...saved, hotkeys: hk }
+    const rest = { ...saved }
+    for (const k of ['overlay', 'overlayPos', 'overlayDisplay']) delete rest[k] // the removed overlay window
+    return { ...APP_SETTINGS_DEFAULTS, ...rest, hotkeys: hk }
   } catch {
     return { ...APP_SETTINGS_DEFAULTS, hotkeys: { ...HOTKEY_DEFAULTS } }
   }
@@ -132,7 +132,7 @@ function loginItemState() {
   }
 }
 function appSettingsView() {
-  return { ...appSettings, ...loginItemState(), hotkeyErrors, displays: displayList(), platform: process.platform, packaged: app.isPackaged }
+  return { ...appSettings, ...loginItemState(), hotkeyErrors, platform: process.platform, packaged: app.isPackaged }
 }
 
 function showWindow() {
@@ -181,9 +181,7 @@ function updateTray() {
 }
 function setAppSettings(patch) {
   const clean = {}
-  for (const k of ['launchAtLogin', 'startInTray', 'overlay', 'voice']) if (patch && typeof patch[k] === 'boolean') clean[k] = patch[k]
-  if (patch && OVERLAY_POSITIONS.includes(patch.overlayPos)) clean.overlayPos = patch.overlayPos
-  if (patch && typeof patch.overlayDisplay === 'string' && /^(auto|primary|\d{1,20})$/.test(patch.overlayDisplay)) clean.overlayDisplay = patch.overlayDisplay
+  for (const k of ['launchAtLogin', 'startInTray', 'voice']) if (patch && typeof patch[k] === 'boolean') clean[k] = patch[k]
   if (patch && patch.hotkeys && typeof patch.hotkeys === 'object') {
     const hk = { ...appSettings.hotkeys }
     for (const k of Object.keys(HOTKEY_DEFAULTS)) {
@@ -205,181 +203,20 @@ function setAppSettings(patch) {
   applyLoginItem()
   updateTray()
   registerHotkeys()
-  if (!overlayWin) createOverlay()
-  sendOverlayConfig()
-  updateOverlay()
   const view = appSettingsView()
   if (win) win.webContents.send('app-settings', view)
   return view
 }
 ipcMain.handle('app-settings:get', () => appSettingsView())
 
-// ---- Overlay: always-on-top mini window, and the voice ----
-// League is played in exclusive fullscreen, which no separate window can draw
-// over (only code injected into the game can, and that is not done here). So:
-//   - the window goes on a second screen when there is one (overlayDisplay);
-//   - its page also speaks the recommendations, which works over any game.
-// The window exists even when it is never shown, for the voice. It never
-// takes focus and lets clicks through. It is hidden for the moment the scan
-// hotkey captures the screen, so its own text is never OCR'd. What it shows is
-// decided by its page; it asks to be shown via 'overlay:want'.
-const OVERLAY_W = 404
-let overlayWin = null
-let overlayMode = 'auto' // auto | pinned (hotkey: always show) | hidden (hotkey: hide until next offer)
-let overlayWant = 'none' // offer | game | info | pinned | none
-let overlayHeight = 160
-let previewUntil = 0
 let hotkeyErrors = []
 
-function createOverlay() {
-  overlayWin = new BrowserWindow({
-    width: OVERLAY_W,
-    height: overlayHeight,
-    show: false,
-    frame: false,
-    transparent: true,
-    backgroundColor: '#00000000',
-    resizable: false,
-    movable: false,
-    minimizable: false,
-    maximizable: false,
-    fullscreenable: false,
-    skipTaskbar: true,
-    focusable: false,
-    alwaysOnTop: true,
-    hasShadow: false,
-    title: 'ezlol overlay',
-    // Not throttled while hidden: it keeps polling the game and speaking.
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false },
-  })
-  overlayWin.setAlwaysOnTop(true, 'screen-saver')
-  overlayWin.setIgnoreMouseEvents(true)
-  overlayWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-  overlayWin.loadURL(`${URL}/?overlay=1`)
-  overlayWin.webContents.on('did-finish-load', () => {
-    if (!overlayWin) return
-    overlayWin.webContents.send('overlay:mode', overlayMode)
-    sendOverlayConfig()
-  })
-  overlayWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-  overlayWin.on('closed', () => (overlayWin = null))
+// ---- Hotkey results: shown in the window (the player switches out to it) and spoken if the voice is on ----
+function hotkeyResult(text, say = false) {
+  if (win) win.webContents.send('hotkey:result', String(text || ''), !!say)
 }
-
-function sendOverlayConfig() {
-  if (!overlayWin) return
-  overlayWin.webContents.send('overlay:hotkeys', appSettings.hotkeys)
-  overlayWin.webContents.send('overlay:voice', !!appSettings.voice)
-}
-
-function displayList() {
-  try {
-    const primary = screen.getPrimaryDisplay()
-    return screen.getAllDisplays().map((d, i) => ({
-      id: String(d.id),
-      primary: d.id === primary.id,
-      label: `${d.id === primary.id ? '主屏（游戏）' : '副屏'} ${i + 1} · ${d.bounds.width}×${d.bounds.height}`,
-    }))
-  } catch {
-    return []
-  }
-}
-
-/** The screen the overlay goes on, or null: auto with a single screen. */
-function overlayDisplay() {
-  const primary = screen.getPrimaryDisplay()
-  const all = screen.getAllDisplays()
-  const sel = appSettings.overlayDisplay || 'auto'
-  if (sel === 'primary') return primary
-  if (sel !== 'auto') {
-    const d = all.find((x) => String(x.id) === sel)
-    if (d) return d
-  }
-  return all.find((x) => x.id !== primary.id) || null
-}
-
-function positionOverlay() {
-  if (!overlayWin) return
-  // Full display bounds, not the work area: a fullscreen game covers the taskbar.
-  const d = (overlayDisplay() || screen.getPrimaryDisplay()).bounds
-  const w = OVERLAY_W
-  const h = Math.max(40, Math.min(640, overlayHeight))
-  const m = 16
-  let x = d.x + m
-  let y = d.y + d.height - h - m
-  switch (appSettings.overlayPos) {
-    case 'top-left':
-      y = d.y + m
-      break
-    case 'left-middle':
-      y = d.y + (d.height - h) / 2
-      break
-    case 'top-right':
-      x = d.x + d.width - w - m
-      y = d.y + m
-      break
-    case 'bottom-right':
-      x = d.x + d.width - w - m
-      break
-  }
-  overlayWin.setBounds({ x: Math.round(x), y: Math.round(y), width: w, height: h })
-}
-
-let capturing = false // hidden while the scan hotkey captures the screen
-function updateOverlay() {
-  if (!overlayWin) return
-  const previewing = Date.now() < previewUntil
-  const onScreen = !!overlayDisplay() // auto on a single screen: voice only
-  const show = !capturing && (previewing || (appSettings.overlay && onScreen && (overlayMode === 'pinned' || (overlayMode !== 'hidden' && overlayWant !== 'none'))))
-  if (show) {
-    positionOverlay()
-    if (!overlayWin.isVisible()) overlayWin.showInactive()
-    // Re-assert on every update (about once a second): a game switching to
-    // fullscreen can push other topmost windows behind it.
-    overlayWin.setAlwaysOnTop(true, 'screen-saver')
-    overlayWin.moveTop()
-  } else if (overlayWin.isVisible()) {
-    overlayWin.hide()
-  }
-}
-
-ipcMain.on('overlay:want', (e, state, height) => {
-  if (!overlayWin || e.sender !== overlayWin.webContents) return
-  if (!['offer', 'game', 'info', 'pinned', 'none'].includes(state)) return
-  // A new augment choice, or a new game, brings a hidden overlay back.
-  if (((state === 'offer' && overlayWant !== 'offer') || (state === 'game' && overlayWant === 'none')) && overlayMode === 'hidden') {
-    overlayMode = 'auto'
-    overlayWin.webContents.send('overlay:mode', overlayMode)
-  }
-  overlayWant = state
-  if (height > 0) overlayHeight = height
-  updateOverlay()
-})
-
-ipcMain.handle('overlay:preview', () => {
-  if (!overlayWin) createOverlay()
-  previewUntil = Date.now() + 10000
-  const send = () => overlayWin && overlayWin.webContents.send('overlay:preview')
-  if (overlayWin.webContents.isLoading()) overlayWin.webContents.once('did-finish-load', send)
-  else send()
-  setTimeout(updateOverlay, 300)
-  setTimeout(updateOverlay, 10100)
-  return true
-})
-
-// A short message in the overlay; say = also speak it.
-function flashOverlay(text, say = false) {
-  if (!overlayWin) return
-  overlayWin.webContents.send('overlay:flash', text, !!say)
-}
-
-// The first part of an error, short enough to be spoken.
-function spoken(text) {
-  return String(text || '').split(/[（(]/)[0].slice(0, 40)
-}
-
 ipcMain.handle('voice:test', () => {
-  if (!overlayWin) createOverlay()
-  overlayWin.webContents.send('overlay:say', '语音播报正常。推荐中间的，大法师。', true)
+  if (win) win.webContents.send('voice:say', '语音播报正常。推荐中间的，大法师。', true)
   return true
 })
 
@@ -405,65 +242,33 @@ function postJSON(pathname, body, timeoutMs = 3000) {
   })
 }
 
-function refreshOverlay() {
-  if (overlayWin) overlayWin.webContents.send('overlay:refresh')
+function refreshGame() {
   if (win) win.webContents.send('game:refresh')
 }
 
 async function pickSlot(n) {
-  if (overlayMode === 'hidden') overlayMode = 'auto'
   const r = await postJSON('/api/game/pick-slot', { slot: n })
-  if (r.status === 200) flashOverlay(`已记录：选了第 ${n} 个「${r.body.augment || ''}」`)
-  else flashOverlay(r.body.error || '标记失败', true)
-  refreshOverlay()
+  if (r.status === 200) hotkeyResult(`已记录：选了第 ${n} 个「${r.body.augment || ''}」`)
+  else hotkeyResult(r.body.error || '标记失败', true)
+  refreshGame()
 }
 
 // The player says the augment choice is open: capture and read it right now.
+// A read offer is spoken by the window when it shows up.
 let scanning = false
 async function scanNow() {
   if (scanning) return
   scanning = true
-  if (overlayMode === 'hidden') {
-    overlayMode = 'auto'
-    if (overlayWin) overlayWin.webContents.send('overlay:mode', overlayMode)
-  }
-  // Out of the picture while the screen is captured (its text would be read too).
-  const wasVisible = !!overlayWin && overlayWin.isVisible()
-  if (wasVisible) {
-    capturing = true
-    updateOverlay()
-    await new Promise((r) => setTimeout(r, 120))
-  }
   try {
     // The first scan of a session also starts the OCR helper: allow it time.
     const r = await postJSON('/api/game/scan', {}, 20000)
-    capturing = false
-    updateOverlay()
-    // A read offer is spoken by the overlay page when it shows up.
-    if (r.status === 200) flashOverlay(`识别到：${(r.body.names || []).join(' / ')}，推荐「${r.body.best || ''}」`)
-    else if (r.status === 202) {
-      flashOverlay(r.body.message || 'AI 正在推断…')
-      if (overlayWin) overlayWin.webContents.send('overlay:say', '没认全，AI 正在推断')
-    } else flashOverlay(r.body.error || '识别失败', true)
+    if (r.status === 200) hotkeyResult(`识别到：${(r.body.names || []).join(' / ')}，推荐「${r.body.best || ''}」`)
+    else if (r.status === 202) hotkeyResult(r.body.message || '没认全，AI 正在推断', true)
+    else hotkeyResult(r.body.error || '识别失败', true)
   } finally {
     scanning = false
-    capturing = false
-    updateOverlay()
-    refreshOverlay()
+    refreshGame()
   }
-}
-
-// Speak the build now (the overlay page knows it).
-function speakBuild() {
-  if (!overlayWin) createOverlay()
-  overlayWin.webContents.send('overlay:speak-build')
-}
-
-function toggleOverlay() {
-  if (!overlayWin) createOverlay()
-  overlayMode = overlayWin.isVisible() ? 'hidden' : 'pinned'
-  overlayWin.webContents.send('overlay:mode', overlayMode)
-  updateOverlay()
 }
 
 let hotkeysSuspended = false
@@ -472,7 +277,6 @@ function registerHotkeys() {
   globalShortcut.unregisterAll()
   hotkeyErrors = []
   const hk = appSettings.hotkeys
-  if (overlayWin) overlayWin.webContents.send('overlay:hotkeys', hk)
   if (hotkeysSuspended) return
   const reg = (acc, fn) => {
     try {
@@ -485,8 +289,6 @@ function registerHotkeys() {
   reg(hk.pick1, () => pickSlot(1))
   reg(hk.pick2, () => pickSlot(2))
   reg(hk.pick3, () => pickSlot(3))
-  reg(hk.build, speakBuild)
-  reg(hk.toggle, toggleOverlay)
 }
 // While a new hotkey is being recorded in Settings, the global ones are let
 // go: otherwise pressing a combination that is already registered would be
@@ -581,6 +383,8 @@ function createWindow(show = true) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // Keep polling the game and speaking while hidden behind a fullscreen game.
+      backgroundThrottling: false,
     },
   })
   // Invisible to screen capture (shows as black there): the augment reader
@@ -609,7 +413,7 @@ function createWindow(show = true) {
   })
   win.on('closed', () => {
     win = null
-    // The overlay is a window too, so 'window-all-closed' would never fire: quit here
+    // Closing the window quits ezlol
     // (tray mode keeps running hidden instead, see 'close' above).
     if (process.platform !== 'darwin' && !app.isQuitting) {
       app.isQuitting = true
@@ -765,14 +569,6 @@ app.whenReady().then(async () => {
   applyLoginItem()
   updateTray()
   registerHotkeys()
-  createOverlay() // also when hidden: it speaks
-  const displaysChanged = () => {
-    updateOverlay()
-    if (win) win.webContents.send('app-settings', appSettingsView())
-  }
-  screen.on('display-metrics-changed', displaysChanged)
-  screen.on('display-added', displaysChanged)
-  screen.on('display-removed', displaysChanged)
   setupUpdates()
   app.on('activate', () => showWindow())
 })

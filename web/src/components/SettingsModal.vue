@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from '../api'
 import type { SettingsView, UpdateInfo } from '../types'
 import { DEFAULT_HOTKEYS, hotkeyFromEvent, prettyHotkey } from '../api'
-import type { AppSettings, Hotkeys, OverlayPos } from '../api'
+import type { AppSettings, Hotkeys } from '../api'
 import * as sound from '../sound'
 
 const emit = defineEmits<{ close: [] }>()
@@ -19,7 +19,7 @@ const dialog = ref<HTMLElement | null>(null)
 // Desktop-only settings live in the Electron shell; absent in a plain browser.
 const desktop = !!window.ezlol?.getAppSettings
 const appS = ref<AppSettings | null>(null)
-async function saveApp(patch: Partial<Pick<AppSettings, 'launchAtLogin' | 'startInTray' | 'overlay' | 'overlayPos' | 'overlayDisplay' | 'voice' | 'hotkeys'>>) {
+async function saveApp(patch: Partial<Pick<AppSettings, 'launchAtLogin' | 'startInTray' | 'voice' | 'hotkeys'>>) {
   if (!window.ezlol?.setAppSettings) return
   busy.value = true
   try {
@@ -32,20 +32,11 @@ async function saveApp(patch: Partial<Pick<AppSettings, 'launchAtLogin' | 'start
   }
 }
 if (desktop) window.ezlol?.onAppSettings?.((v) => (appS.value = v))
-const POSITIONS: { id: OverlayPos; label: string }[] = [
-  { id: 'bottom-left', label: '左下角' },
-  { id: 'left-middle', label: '左侧中间' },
-  { id: 'top-left', label: '左上角' },
-  { id: 'top-right', label: '右上角' },
-  { id: 'bottom-right', label: '右下角' },
-]
 const HOTKEY_ROWS: { key: keyof Hotkeys; label: string; desc: string }[] = [
-  { key: 'scan', label: '立即识别强化', desc: '强化选择界面打开后按一下：截屏识别并给出推荐。这是唯一会截屏的时候。' },
-  { key: 'pick1', label: '选了第 1 个', desc: '选完按：马上记下你选的是左边第 1 个（不按就记为推荐的那个）。' },
+  { key: 'scan', label: '立即识别强化', desc: '强化选择界面打开后按一下：截屏识别，推荐显示在这个窗口里。只有按它时才截屏。' },
+  { key: 'pick1', label: '选了第 1 个', desc: '选完按：记下你选的是左边第 1 个，出装按它推荐（不按就记为推荐的那个）。' },
   { key: 'pick2', label: '选了第 2 个', desc: '同上，中间那个。' },
   { key: 'pick3', label: '选了第 3 个', desc: '同上，右边那个。' },
-  { key: 'build', label: '播报出装', desc: '念出下一件和核心出装还差的装备（开局念出门装）。' },
-  { key: 'toggle', label: '显示 / 隐藏小窗', desc: '' },
 ]
 const prettyKey = prettyHotkey
 // Recording a hotkey: click the button, press the combination. The global
@@ -104,11 +95,6 @@ const defaultKeys = Object.values(DEFAULT_HOTKEYS).map(prettyHotkey).join('、')
 async function testVoice() {
   await window.ezlol?.testVoice?.()
   flash('正在试听', 'ok')
-}
-const hasSecondScreen = computed(() => (appS.value?.displays?.length ?? 0) > 1)
-async function previewOverlay() {
-  await window.ezlol?.previewOverlay?.()
-  flash('小窗预览 10 秒', 'ok')
 }
 let msgTimer: ReturnType<typeof setTimeout> | undefined
 let pressOnBackdrop = false
@@ -276,7 +262,7 @@ onBeforeUnmount(() => {
             <div class="setting">
               <dt>
                 <span class="lbl"><label id="set-lbl-ocr" for="set-ocr">识别屏幕上的强化选项</label></span>
-                <span v-if="s.ocrAvailable" class="desc muted">强化选择界面打开后按「立即识别强化」快捷键（默认 Ctrl+Alt+S），读出屏幕上的选项并告诉你选哪个。只在按键时截屏，平时不截。全屏模式可能截不到画面，截不到就改用「无边框」。</span>
+                <span v-if="s.ocrAvailable" class="desc muted">强化选择界面打开后按「立即识别强化」快捷键（默认 Ctrl+Alt+S），读出屏幕上的选项并告诉你选哪个。只在按键时截屏，平时不截。</span>
                 <span v-else class="desc warn">这台电脑上用不了屏幕识别。</span>
                 <span v-if="s.ocrAvailable && s.ocrLang && !s.ocrLang.startsWith('zh')" class="desc warn">
                   当前识别语言是 {{ s.ocrLang }}，认不出中文强化名。请在 Windows「设置 → 时间和语言 → 语言」里添加「中文(简体)」，并勾选「光学字符识别」，然后重启 ezlol。
@@ -486,59 +472,21 @@ onBeforeUnmount(() => {
               </div>
             </dl>
 
-            <h3>游戏内提示与快捷键</h3>
+            <h3>游戏内快捷键</h3>
             <p class="muted lead">
-              独占全屏下，任何窗口都盖不到游戏上面（除非往游戏里注入代码，ezlol 不这么做）。所以游戏里的提示分两种：
-              <b>语音播报</b>，单屏也能用；有<b>第二块屏幕</b>时，小窗自动放在副屏上。快捷键在全屏游戏里照样能用。
+              游戏是独占全屏，ezlol 不往游戏上叠窗口：按快捷键识别后，切出来（Alt+Tab）在这个窗口看推荐；也可以打开语音，不用切出来。快捷键在全屏游戏里照样能用。
             </p>
             <dl class="rows">
               <div class="setting">
                 <dt>
-                  <span class="lbl"><label id="set-lbl-voice" for="set-voice">语音播报</label></span>
-                  <span class="desc muted">按识别键后念出推荐（「推荐中间的，大法师」）；开局念出装，记下强化后念下一件，到 7 / 11 / 15 级提醒按识别键。用的是 Windows 自带的中文语音，不联网。</span>
+                  <span class="lbl"><label id="set-lbl-voice" for="set-voice">语音播报（可选）</label></span>
+                  <span class="desc muted">识别后念出推荐（「推荐中间的，大法师」），记下强化后念下一件装备。用 Windows 自带的中文语音，不联网。</span>
                 </dt>
                 <dd>
                   <button type="button" @click="testVoice">试听</button>
                   <button id="set-voice" type="button" role="switch" class="toggle" :class="{ on: appS.voice }" :aria-checked="appS.voice" aria-labelledby="set-lbl-voice" :disabled="busy" @click="saveApp({ voice: !appS.voice })">
                     <span class="track" aria-hidden="true" /><span class="state">{{ appS.voice ? '开' : '关' }}</span>
                   </button>
-                </dd>
-              </div>
-              <div class="setting">
-                <dt>
-                  <span class="lbl"><label id="set-lbl-ov" for="set-ov">显示小窗</label></span>
-                  <span class="desc muted">在游戏里一直显示出门装、下一件、核心出装和已选强化；按识别键后显示强化推荐。</span>
-                </dt>
-                <dd>
-                  <button id="set-ov" type="button" role="switch" class="toggle" :class="{ on: appS.overlay }" :aria-checked="appS.overlay" aria-labelledby="set-lbl-ov" :disabled="busy" @click="saveApp({ overlay: !appS.overlay })">
-                    <span class="track" aria-hidden="true" /><span class="state">{{ appS.overlay ? '开' : '关' }}</span>
-                  </button>
-                </dd>
-              </div>
-              <div class="setting">
-                <dt>
-                  <span class="lbl"><label for="set-ovdisp">小窗显示在</label></span>
-                  <span v-if="!hasSecondScreen && appS.overlayDisplay !== 'primary'" class="desc warn">现在只有一块屏幕：独占全屏时小窗看不到，请靠语音播报。接上第二块屏幕后小窗会自动显示在那里。</span>
-                  <span v-else-if="appS.overlayDisplay === 'primary'" class="desc warn">放在游戏所在的屏幕上，只有「无边框」或「窗口」模式才看得到。</span>
-                  <span v-else class="desc muted">游戏用独占全屏时，把小窗放在副屏上。</span>
-                </dt>
-                <dd>
-                  <select id="set-ovdisp" :value="appS.overlayDisplay" @change="saveApp({ overlayDisplay: ($event.target as HTMLSelectElement).value })">
-                    <option value="auto">自动（有副屏就放副屏）</option>
-                    <option v-for="d in appS.displays ?? []" :key="d.id" :value="d.primary ? 'primary' : d.id">{{ d.label }}</option>
-                  </select>
-                </dd>
-              </div>
-              <div class="setting">
-                <dt>
-                  <span class="lbl"><label for="set-ovpos">小窗位置</label></span>
-                  <span class="desc muted">在上面所选屏幕里的位置。放在游戏屏幕上时，别挡住屏幕中间的强化卡片。</span>
-                </dt>
-                <dd>
-                  <select id="set-ovpos" :value="appS.overlayPos" @change="saveApp({ overlayPos: ($event.target as HTMLSelectElement).value as OverlayPos })">
-                    <option v-for="p in POSITIONS" :key="p.id" :value="p.id">{{ p.label }}</option>
-                  </select>
-                  <button type="button" @click="previewOverlay">预览小窗</button>
                 </dd>
               </div>
               <div v-for="r in HOTKEY_ROWS" :key="r.key" class="setting">
