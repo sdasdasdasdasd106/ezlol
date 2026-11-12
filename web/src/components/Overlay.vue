@@ -11,7 +11,8 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api, DEFAULT_HOTKEYS, prettyHotkey } from '../api'
 import type { Hotkeys } from '../api'
-import type { AugBuildResponse, Build, Game, ItemRef, OfferCard } from '../types'
+import type { AugBuildResponse, AugmentOffer, Build, Game, ItemRef, OfferCard } from '../types'
+import { place, say, setVoice } from '../voice'
 
 const game = ref<Game | null>(null)
 const plan = ref<AugBuildResponse | null>(null)
@@ -94,12 +95,14 @@ watch(
   () => (aram.value && !preview.value ? g.value?.me?.champion.key ?? '' : ''),
   async (key) => {
     build.value = null
+    buildDone.value = false
     if (!key) return
     try {
       build.value = await api.build(key)
     } catch {
       build.value = null
     }
+    buildDone.value = true
   },
 )
 // Next item and core for the augments taken so far and the items you own.
@@ -118,6 +121,112 @@ watch(
       if (my === planSeq) plan.value = r
     } catch {
       if (my === planSeq) plan.value = null
+    }
+    if (my !== planSeq) return
+    planDone.value = true
+    // A pick was just recorded: say it, with the next item for the new augments.
+    if (pickSay) {
+      const n0 = plan.value?.plan.next?.[0]?.item.name
+      say(`记下了${pickSay}。${n0 ? `下一件，${n0}。` : ''}`)
+      pickSay = ''
+    }
+  },
+)
+
+// ---- Voice: everything the window shows, spoken (exclusive fullscreen) ----
+const buildDone = ref(false)
+const planDone = ref(false)
+let polls = 0 // the first poll only learns the state; nothing is announced for it
+let pickSay = ''
+const names = (xs: { name: string }[]) => xs.map((x) => x.name).filter(Boolean).join('、')
+
+function offerSpeech(o: AugmentOffer): string {
+  const order = cards.value
+  const n = order.length
+  const best = o.offered?.[0]
+  if (!best) return ''
+  let t = `${o.via === 'ai' ? 'AI 推断，' : ''}推荐${place(order.findIndex((c) => c.id === best.id), n)}的，${best.name}。`
+  const second = o.offered?.[1]
+  if (second && o.note?.includes('差距很小')) t += `和${place(order.findIndex((c) => c.id === second.id), n)}的${second.name}差不多。`
+  return t
+}
+function buildSpeech(): string {
+  if (!aram.value || !g.value?.me) return '现在不在海克斯乱斗对局里。'
+  const parts: string[] = []
+  if (showStart.value && starting.value.length) parts.push(`出门，${names(starting.value)}。`)
+  const nx = next.value
+  if (nx.length) parts.push(`下一件，${nx[0].item.name}${nx[1] ? `，或者${nx[1].item.name}` : ''}。`)
+  const c = core.value
+  if (c) {
+    const rest = c.items.filter((it) => !ownedSet.value.has(it.id))
+    const boots = c.boots && !ownedSet.value.has(c.boots.id) ? `，鞋子${c.boots.name}` : ''
+    if (rest.length || boots) parts.push(`核心${rest.length < c.items.length ? '还差' : ''}，${names(rest)}${boots}。`)
+  }
+  if (conflict.value) parts.push('注意，你的装备和强化不是一个路线。')
+  return parts.join('') || '出装数据还没加载好。'
+}
+
+// A new read of the cards (each scan hotkey press, or the AI's answer).
+watch(
+  () => (offer.value && !preview.value ? `${offer.value.scannedAt ?? ''}|${cards.value.map((c) => c.id).join(',')}` : ''),
+  (k) => {
+    if (k && offer.value) say(offerSpeech(offer.value), { interrupt: true })
+  },
+)
+// The AI review disagrees with the statistics.
+let spokenAI = ''
+watch(
+  () => {
+    const o = offer.value
+    return o?.ai?.status === 'done' && !o.ai.agree && !preview.value ? `${o.scannedAt ?? ''}|${o.ai.pick}` : ''
+  },
+  (k) => {
+    const o = offer.value
+    if (!k || k === spokenAI || !o?.ai?.pick) return
+    spokenAI = k
+    const i = cards.value.findIndex((c) => c.name === o.ai!.pick)
+    say(`AI 建议改选${i >= 0 ? `${place(i, cards.value.length)}的，` : ''}${o.ai.pick}。`)
+  },
+)
+// A pick recorded (1/2/3, the next level, or time): spoken with the next item once the plan is in.
+watch(
+  () => picks.value.map((p) => `${p.stage}:${p.augmentId}`).join(','),
+  (now, before) => {
+    if (polls > 1 && now && now !== before && lastPick.value) pickSay = lastPick.value.name
+  },
+)
+// A pick is due: remind which key reads it (the start pick is in the intro).
+watch(
+  () => (due.value ? due.value.stage : 0),
+  (stage) => {
+    if (polls > 1 && stage > 1) say(`${STAGE[stage]}强化，打开后按识别键。`)
+  },
+)
+// Once per game, at the loading screen: the build.
+let introFor = ''
+watch(
+  () => [aram.value, g.value?.me?.champion.id, buildDone.value, planDone.value].join('|'),
+  () => {
+    const gm = g.value
+    if (!aram.value || !gm?.me || preview.value) return
+    const key = String(gm.me.champion.id)
+    if (introFor === key || !buildDone.value || !planDone.value) return
+    introFor = key
+    if (gm.gameTime > 150) return // ezlol started mid-game: no intro
+    const parts = [`${gm.me.champion.name}。`]
+    if (starting.value.length) parts.push(`出门，${names(starting.value)}。`)
+    const c = core.value
+    if (c) parts.push(`核心，${names(c.items)}${c.boots ? `，鞋子${c.boots.name}` : ''}。`)
+    parts.push('开局强化打开后按识别键。')
+    say(parts.join(''))
+  },
+)
+watch(
+  () => g.value?.inGame,
+  (v) => {
+    if (!v) {
+      introFor = ''
+      planDone.value = false
     }
   },
 )
@@ -157,6 +266,7 @@ async function poll() {
     game.value = null
   } finally {
     polling = false
+    polls++
   }
   if (again) {
     again = false
@@ -174,7 +284,11 @@ onMounted(() => {
   tick = window.setInterval(report, 1000)
   window.ezlol?.overlay?.onMode((m) => (mode.value = m))
   window.ezlol?.overlay?.onHotkeys((h) => (hotkeys.value = h))
-  window.ezlol?.overlay?.onFlash((text) => {
+  window.ezlol?.overlay?.onVoice(setVoice)
+  window.ezlol?.overlay?.onSay((text, force) => say(text, { interrupt: true, force }))
+  window.ezlol?.overlay?.onSpeakBuild(() => say(buildSpeech(), { interrupt: true }))
+  window.ezlol?.overlay?.onFlash((text, speak) => {
+    if (speak) say(text, { interrupt: true })
     flash.value = text
     infoUntil.value = Date.now() + 6000
     clearTimeout(flashTimer)
@@ -253,7 +367,7 @@ onUnmounted(() => {
         <span v-for="p in picks" :key="p.stage" class="aug" :class="[p.rarity, { assumed: p.assumed }]">{{ p.name }}<template v-if="p.assumed">?</template></span>
       </div>
       <div v-if="lastPick?.assumed" class="muted small">「{{ lastPick.name }}」是按推荐记的；不对就按 {{ pickKeys }}</div>
-      <div class="foot">{{ pretty(hotkeys.scan) }} 识别强化 · {{ pretty(hotkeys.toggle) }} 隐藏小窗</div>
+      <div class="foot">{{ pretty(hotkeys.scan) }} 识别强化 · {{ pretty(hotkeys.build) }} 播报出装 · {{ pretty(hotkeys.toggle) }} 隐藏</div>
     </template>
 
     <template v-else-if="!flash">

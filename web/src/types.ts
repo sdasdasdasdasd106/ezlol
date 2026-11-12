@@ -95,6 +95,7 @@ export interface AugmentOffer {
   offered: OfferCard[] | null
   screen?: number[] // augment ids left to right, as on screen
   chosen?: number // slot (1..3) marked with a hotkey
+  scannedAt?: string // when it was read (each scan hotkey press)
   best?: string
   why?: string
   note?: string

@@ -19,7 +19,7 @@ const dialog = ref<HTMLElement | null>(null)
 // Desktop-only settings live in the Electron shell; absent in a plain browser.
 const desktop = !!window.ezlol?.getAppSettings
 const appS = ref<AppSettings | null>(null)
-async function saveApp(patch: Partial<Pick<AppSettings, 'launchAtLogin' | 'startInTray' | 'overlay' | 'overlayPos' | 'hotkeys'>>) {
+async function saveApp(patch: Partial<Pick<AppSettings, 'launchAtLogin' | 'startInTray' | 'overlay' | 'overlayPos' | 'overlayDisplay' | 'voice' | 'hotkeys'>>) {
   if (!window.ezlol?.setAppSettings) return
   busy.value = true
   try {
@@ -44,6 +44,7 @@ const HOTKEY_ROWS: { key: keyof Hotkeys; label: string; desc: string }[] = [
   { key: 'pick1', label: '选了第 1 个', desc: '选完按：马上记下你选的是左边第 1 个（不按就记为推荐的那个）。' },
   { key: 'pick2', label: '选了第 2 个', desc: '同上，中间那个。' },
   { key: 'pick3', label: '选了第 3 个', desc: '同上，右边那个。' },
+  { key: 'build', label: '播报出装', desc: '念出下一件和核心出装还差的装备（开局念出门装）。' },
   { key: 'toggle', label: '显示 / 隐藏小窗', desc: '' },
 ]
 const prettyKey = prettyHotkey
@@ -100,6 +101,11 @@ async function resetHotkeys() {
   }
 }
 const defaultKeys = Object.values(DEFAULT_HOTKEYS).map(prettyHotkey).join('、')
+async function testVoice() {
+  await window.ezlol?.testVoice?.()
+  flash('正在试听', 'ok')
+}
+const hasSecondScreen = computed(() => (appS.value?.displays?.length ?? 0) > 1)
 async function previewOverlay() {
   await window.ezlol?.previewOverlay?.()
   flash('小窗预览 10 秒', 'ok')
@@ -480,18 +486,28 @@ onBeforeUnmount(() => {
               </div>
             </dl>
 
-            <h3>游戏内小窗与快捷键</h3>
+            <h3>游戏内提示与快捷键</h3>
             <p class="muted lead">
-              小窗总在最上层，点击会穿过它、不会抢游戏焦点，截屏时也看不到它（不影响识别）。
-              全屏模式下能不能盖在游戏上，取决于 Windows 的「全屏优化」：请在英雄联盟游戏程序
-              <code>Game\League of Legends.exe</code> 上右键 → 属性 → 兼容性，确认<b>没有</b>勾选「禁用全屏优化」。
-              如果全屏下还是看不到小窗，就只能改用「无边框」模式（看起来和全屏一样）。
+              独占全屏下，任何窗口都盖不到游戏上面（除非往游戏里注入代码，ezlol 不这么做）。所以游戏里的提示分两种：
+              <b>语音播报</b>，单屏也能用；有<b>第二块屏幕</b>时，小窗自动放在副屏上。快捷键在全屏游戏里照样能用。
             </p>
             <dl class="rows">
               <div class="setting">
                 <dt>
+                  <span class="lbl"><label id="set-lbl-voice" for="set-voice">语音播报</label></span>
+                  <span class="desc muted">按识别键后念出推荐（「推荐中间的，大法师」）；开局念出装，记下强化后念下一件，到 7 / 11 / 15 级提醒按识别键。用的是 Windows 自带的中文语音，不联网。</span>
+                </dt>
+                <dd>
+                  <button type="button" @click="testVoice">试听</button>
+                  <button id="set-voice" type="button" role="switch" class="toggle" :class="{ on: appS.voice }" :aria-checked="appS.voice" aria-labelledby="set-lbl-voice" :disabled="busy" @click="saveApp({ voice: !appS.voice })">
+                    <span class="track" aria-hidden="true" /><span class="state">{{ appS.voice ? '开' : '关' }}</span>
+                  </button>
+                </dd>
+              </div>
+              <div class="setting">
+                <dt>
                   <span class="lbl"><label id="set-lbl-ov" for="set-ov">显示小窗</label></span>
-                  <span class="desc muted">进入海克斯乱斗后一直显示：出门装、下一件、核心出装和已选强化；按识别快捷键后显示强化推荐。</span>
+                  <span class="desc muted">在游戏里一直显示出门装、下一件、核心出装和已选强化；按识别键后显示强化推荐。</span>
                 </dt>
                 <dd>
                   <button id="set-ov" type="button" role="switch" class="toggle" :class="{ on: appS.overlay }" :aria-checked="appS.overlay" aria-labelledby="set-lbl-ov" :disabled="busy" @click="saveApp({ overlay: !appS.overlay })">
@@ -501,8 +517,22 @@ onBeforeUnmount(() => {
               </div>
               <div class="setting">
                 <dt>
+                  <span class="lbl"><label for="set-ovdisp">小窗显示在</label></span>
+                  <span v-if="!hasSecondScreen && appS.overlayDisplay !== 'primary'" class="desc warn">现在只有一块屏幕：独占全屏时小窗看不到，请靠语音播报。接上第二块屏幕后小窗会自动显示在那里。</span>
+                  <span v-else-if="appS.overlayDisplay === 'primary'" class="desc warn">放在游戏所在的屏幕上，只有「无边框」或「窗口」模式才看得到。</span>
+                  <span v-else class="desc muted">游戏用独占全屏时，把小窗放在副屏上。</span>
+                </dt>
+                <dd>
+                  <select id="set-ovdisp" :value="appS.overlayDisplay" @change="saveApp({ overlayDisplay: ($event.target as HTMLSelectElement).value })">
+                    <option value="auto">自动（有副屏就放副屏）</option>
+                    <option v-for="d in appS.displays ?? []" :key="d.id" :value="d.primary ? 'primary' : d.id">{{ d.label }}</option>
+                  </select>
+                </dd>
+              </div>
+              <div class="setting">
+                <dt>
                   <span class="lbl"><label for="set-ovpos">小窗位置</label></span>
-                  <span class="desc muted">放在不挡强化卡片的位置（强化卡片在屏幕中间）。</span>
+                  <span class="desc muted">在上面所选屏幕里的位置。放在游戏屏幕上时，别挡住屏幕中间的强化卡片。</span>
                 </dt>
                 <dd>
                   <select id="set-ovpos" :value="appS.overlayPos" @change="saveApp({ overlayPos: ($event.target as HTMLSelectElement).value as OverlayPos })">

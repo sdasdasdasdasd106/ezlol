@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('ezlol', {
   // Global hotkeys are let go while Settings records a new one.
   suspendHotkeys: (on) => ipcRenderer.invoke('hotkeys:suspend', !!on),
   resetHotkeys: () => ipcRenderer.invoke('hotkeys:defaults'),
+  testVoice: () => ipcRenderer.invoke('voice:test'),
   // A hotkey changed the game state (scan, pick): poll now instead of waiting.
   onGameRefresh: (fn) => ipcRenderer.on('game:refresh', () => fn()),
   // Used by the always-on-top overlay window only.
@@ -22,7 +23,10 @@ contextBridge.exposeInMainWorld('ezlol', {
     want: (state, height) => ipcRenderer.send('overlay:want', String(state), Number(height) || 0),
     onMode: (fn) => ipcRenderer.on('overlay:mode', (_e, m) => fn(m)),
     onHotkeys: (fn) => ipcRenderer.on('overlay:hotkeys', (_e, h) => fn(h)),
-    onFlash: (fn) => ipcRenderer.on('overlay:flash', (_e, t) => fn(String(t))),
+    onFlash: (fn) => ipcRenderer.on('overlay:flash', (_e, t, say) => fn(String(t), !!say)),
+    onVoice: (fn) => ipcRenderer.on('overlay:voice', (_e, on) => fn(!!on)),
+    onSay: (fn) => ipcRenderer.on('overlay:say', (_e, t, force) => fn(String(t), !!force)),
+    onSpeakBuild: (fn) => ipcRenderer.on('overlay:speak-build', () => fn()),
     onPreview: (fn) => ipcRenderer.on('overlay:preview', () => fn()),
     onRefresh: (fn) => ipcRenderer.on('overlay:refresh', () => fn()),
   },

@@ -49,6 +49,8 @@ export interface Hotkeys {
   pick1: string
   pick2: string
   pick3: string
+  /** speak the build now */
+  build: string
   toggle: string
 }
 
@@ -59,6 +61,11 @@ export interface AppSettings {
   startInTray: boolean
   overlay: boolean
   overlayPos: OverlayPos
+  /** auto (second screen if any, else none) | primary | a display id */
+  overlayDisplay: string
+  /** speak recommendations */
+  voice: boolean
+  displays?: { id: string; label: string; primary: boolean }[]
   hotkeys: Hotkeys
   /** hotkeys that could not be registered (taken by another program) */
   hotkeyErrors?: string[]
@@ -76,18 +83,22 @@ declare global {
       installUpdate?: () => Promise<boolean>
       checkUpdate?: () => Promise<{ status: string; version?: string; error?: string; progress?: number }>
       getAppSettings?: () => Promise<AppSettings>
-      setAppSettings?: (patch: Partial<Pick<AppSettings, 'launchAtLogin' | 'startInTray' | 'overlay' | 'overlayPos' | 'hotkeys'>>) => Promise<AppSettings>
+      setAppSettings?: (patch: Partial<Pick<AppSettings, 'launchAtLogin' | 'startInTray' | 'overlay' | 'overlayPos' | 'overlayDisplay' | 'voice' | 'hotkeys'>>) => Promise<AppSettings>
       onAppSettings?: (fn: (s: AppSettings) => void) => void
       previewOverlay?: () => Promise<boolean>
       suspendHotkeys?: (on: boolean) => Promise<AppSettings>
       resetHotkeys?: () => Promise<AppSettings>
+      testVoice?: () => Promise<boolean>
       onGameRefresh?: (fn: () => void) => void
       /** Only inside the overlay window. */
       overlay?: {
         want: (state: 'offer' | 'game' | 'info' | 'pinned' | 'none', height: number) => void
         onMode: (fn: (m: 'auto' | 'pinned' | 'hidden') => void) => void
         onHotkeys: (fn: (h: Hotkeys) => void) => void
-        onFlash: (fn: (text: string) => void) => void
+        onFlash: (fn: (text: string, say: boolean) => void) => void
+        onVoice: (fn: (on: boolean) => void) => void
+        onSay: (fn: (text: string, force: boolean) => void) => void
+        onSpeakBuild: (fn: () => void) => void
         onPreview: (fn: () => void) => void
         onRefresh: (fn: () => void) => void
       }
@@ -112,7 +123,7 @@ export function prettyHotkey(k: string | undefined): string {
 }
 
 /** The default hotkeys, for display before the desktop shell reports its own. */
-export const DEFAULT_HOTKEYS: Hotkeys = { scan: 'CommandOrControl+Alt+S', pick1: 'CommandOrControl+Alt+1', pick2: 'CommandOrControl+Alt+2', pick3: 'CommandOrControl+Alt+3', toggle: 'CommandOrControl+Alt+H' }
+export const DEFAULT_HOTKEYS: Hotkeys = { scan: 'CommandOrControl+Alt+S', pick1: 'CommandOrControl+Alt+1', pick2: 'CommandOrControl+Alt+2', pick3: 'CommandOrControl+Alt+3', build: 'CommandOrControl+Alt+B', toggle: 'CommandOrControl+Alt+H' }
 
 /**
  * Turns a key press into an accelerator ("CommandOrControl+Alt+S"), or explains
