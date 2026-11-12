@@ -50,15 +50,13 @@
 
 出装和强化数据都是 aramkit / aramgg / op.gg 的全球数据，和服务器无关，不需要任何设置。
 
-## 自己打包
+## 自己打包与发布
 
-推送到 GitHub 后，`.github/workflows/build.yml` 会自动构建 Windows / macOS 安装包（在 Actions 页面的 Artifacts 里下载）。
-推送一个 `v` 开头的标签（例如 `v2.0.0`）会自动发布 Release；程序的自动更新会跟随**你自己仓库**的 Release，不会被原版覆盖。
+推送到 GitHub 后，`.github/workflows/build.yml` 会自动构建 Windows 安装包（在 Actions 页面的 Artifacts 里下载）。
 
-```bash
-git tag v2.0.0
-git push origin v2.0.0
-```
+**发布新版本**：把 `electron/package.json` 和 `web/package.json` 里的 `version` 改成新版本号（比如 `2.0.1`），合并到 `main`。
+构建完成后会自动创建标签 `v2.0.1` 和对应的 Release；这个版本号已经发布过的话，推送到 `main` 只构建、不发布。
+推送一个 `v` 开头的标签也会发布。程序的自动更新会跟随**你自己仓库**的 Release，不会被原版覆盖。
 
 本地构建需要 Go 1.26+ 和 Node 22+：
 
