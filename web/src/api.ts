@@ -1,4 +1,4 @@
-import type { AugBuildResponse, AugPick, Pitfall, Build, Champion, Research, ChampionInfo, Game, Mastery, PlayRecord, SettingsView, Status, UpdateInfo } from './types'
+import type { AugBuildResponse, AugPick, ChampPitfall, Pitfall, Build, Champion, Research, ChampionInfo, Game, Mastery, PlayRecord, SettingsView, Status, UpdateInfo } from './types'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...init })
@@ -16,6 +16,7 @@ export const api = {
   /** wait: the game is minimized (exclusive fullscreen); capture once the player is back in it. */
   scanNow: (wait = false) => req<{ status: 'ok' | 'ai'; best?: string; names?: string[]; message?: string }>('/api/game/scan', { method: 'POST', body: JSON.stringify({ wait }) }),
   pitfalls: () => req<Pitfall[]>('/api/pitfalls'),
+  championPitfalls: (key: string) => req<{ version: string; pitfalls: ChampPitfall[] }>(`/api/champions/${encodeURIComponent(key)}/pitfalls`),
   /** Mark (on) or unmark an augment as one this champion cannot make use of. */
   setPitfall: (champion: number, augment: number, on: boolean, note = '') =>
     req<{ ok: boolean }>('/api/pitfalls', { method: 'POST', body: JSON.stringify({ champion, augment, on, note }) }),

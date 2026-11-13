@@ -76,6 +76,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/game/scan", s.scanNow)
 	mux.HandleFunc("POST /api/hotkeys", s.setHotkeys)
 	mux.HandleFunc("GET /api/pitfalls", s.listPitfalls)
+	mux.HandleFunc("GET /api/champions/{key}/pitfalls", s.championPitfalls)
 	mux.HandleFunc("POST /api/pitfalls", s.setPitfall)
 	mux.HandleFunc("POST /api/hotkeys/fire", s.fireHotkeyHTTP)
 	mux.HandleFunc("GET /api/ai/research", s.aiResearch)

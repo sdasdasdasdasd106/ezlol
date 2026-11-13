@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,8 +19,10 @@ import (
 // recommendation away from them:
 //   - marks: the player's own, from the augment cards; certain, so the
 //     augment goes to the bottom. A few known ones are built in.
-//   - data (rankMayhem): the augment helps champions on average but this
-//     champion does worse with it, over enough games.
+//   - data: the augment helps champions on average but this champion does
+//     clearly worse with it, over enough games. Live in rankMayhem; and a
+//     table for every champion (pitdata.json, made by tools/pitscan) for the
+//     augment lists outside a game.
 //   - AI: the strategy card's "avoid" list, and the review checks mechanics.
 
 type pitfall struct {
@@ -34,6 +38,28 @@ type pitfall struct {
 var builtinPitfalls = []pitfall{
 	{Champion: 360, Augment: 1092, Note: "莎弥拉触发不了它的效果（玩家反馈）", Builtin: true}, // Samira, 弱点
 }
+
+//go:embed pitdata.json
+var pitdataJSON []byte
+
+// pitTable is tools/pitscan's output: data pitfalls for every champion.
+type pitTable struct {
+	Version   string `json:"version"`
+	Generated string `json:"generated"`
+	Pits      []struct {
+		Champion int     `json:"c"`
+		Augment  int     `json:"a"`
+		Mine     float64 `json:"mine"`
+		Avg      float64 `json:"avg"`
+		Games    int     `json:"g"`
+	} `json:"pits"`
+}
+
+var dataPits = func() pitTable {
+	var t pitTable
+	_ = json.Unmarshal(pitdataJSON, &t)
+	return t
+}()
 
 type pitfallStore struct {
 	mu     sync.Mutex
@@ -200,4 +226,59 @@ func (s *Server) rerankOffer(ctx context.Context) {
 		return
 	}
 	s.showOffer(ctx, live, od, st.last.Screen, st.last.Via, false, "pitfall")
+}
+
+// champPitfall is one augment to avoid on a champion, for the augment lists.
+type champPitfall struct {
+	Augment int     `json:"augment"`
+	Kind    string  `json:"kind"` // mark (the player's or built in) | data
+	Note    string  `json:"note"`
+	Mine    float64 `json:"mine,omitempty"`
+	Avg     float64 `json:"avg,omitempty"`
+	Games   int     `json:"games,omitempty"`
+}
+
+// championPitfalls: GET /api/champions/{key}/pitfalls — the augments to avoid
+// on this champion: marks, then the data table.
+func (s *Server) championPitfalls(w http.ResponseWriter, r *http.Request) {
+	d := s.dd.Data()
+	if d == nil {
+		writeErr(w, 503, "英雄数据还没加载好")
+		return
+	}
+	champ, ok := d.ChampionByKey(r.PathValue("key"))
+	if !ok {
+		writeErr(w, 404, "找不到这个英雄")
+		return
+	}
+	out := []champPitfall{}
+	seen := map[int]bool{}
+	st := &s.pits
+	st.mu.Lock()
+	off := map[int]bool{}
+	for _, p := range s.pitfallMarks() {
+		if p.Champion != champ.ID {
+			continue
+		}
+		if p.Off {
+			off[p.Augment] = true
+			continue
+		}
+		seen[p.Augment] = true
+		out = append(out, champPitfall{Augment: p.Augment, Kind: "mark", Note: firstNonEmpty(p.Note, "你标记过这个英雄用不了它")})
+	}
+	st.mu.Unlock()
+	for _, p := range builtinPitfalls {
+		if p.Champion == champ.ID && !off[p.Augment] && !seen[p.Augment] {
+			seen[p.Augment] = true
+			out = append(out, champPitfall{Augment: p.Augment, Kind: "mark", Note: p.Note})
+		}
+	}
+	for _, p := range dataPits.Pits {
+		if p.Champion == champ.ID && !seen[p.Augment] && !off[p.Augment] {
+			out = append(out, champPitfall{Augment: p.Augment, Kind: "data", Mine: p.Mine, Avg: p.Avg, Games: p.Games,
+				Note: fmt.Sprintf("别的英雄用它平均 %s，%s 用它 %s（%s）", signedPct(p.Avg), champ.Name, signedPct(p.Mine), games(p.Games))})
+		}
+	}
+	writeJSON(w, 200, map[string]any{"version": dataPits.Version, "pitfalls": out})
 }

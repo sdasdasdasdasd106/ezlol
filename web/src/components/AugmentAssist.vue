@@ -164,7 +164,7 @@ watch(
               <span v-else class="na">数据少</span>
             </div>
             <ul v-if="reasonsOf(a).length" class="reasons">
-              <li v-for="(r, j) in reasonsOf(a)" :key="j" :class="{ warn: warn(r) }">{{ r }}</li>
+              <li v-for="(r, j) in reasonsOf(a)" :key="j" :class="{ warn: warn(r), mild: r.startsWith('不太适合') }">{{ r }}</li>
             </ul>
             <footer v-if="a.core" class="build">
               <span class="lab">选它后出装</span>
@@ -254,6 +254,7 @@ kbd { font-family: inherit; font-size: 11px; padding: 1px 6px; border-radius: 5p
 .wr .na { font-size: 12px; color: var(--muted); }
 .reasons { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; font-size: 12px; line-height: 1.45; color: var(--muted); }
 .reasons li.warn { color: var(--red); }
+.reasons li.mild { color: var(--amber); }
 .build { margin-top: auto; padding-top: 8px; border-top: 1px solid var(--line); display: grid; gap: 6px; }
 .build .lab { font-size: 11px; color: var(--muted); }
 .items { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }

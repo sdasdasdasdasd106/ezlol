@@ -2,8 +2,8 @@
 // Build widgets (items, boots, runes, spells, augments, Arena extras). The
 // champion card that drives them is the fixed bar above the grid (ChampionBar).
 import Widget from './Widget.vue'
-import { computed } from 'vue'
-import { winrate } from '../api'
+import { computed, ref, watch } from 'vue'
+import { api, winrate } from '../api'
 import { buildState as s } from '../build'
 import type { Build } from '../types'
 
@@ -15,6 +15,24 @@ const pctf = (x: number) => `${Math.round(x * 100)}%`
 const tierLabel = (t?: number) => (t ? ['', 'S', 'A', 'B', 'C', 'D'][t] ?? String(t) : '')
 const STYLE: Record<string, string> = { crit: '暴击流', on_hit: '攻速特效流', ap: '法强流', hybrid: '混伤流', lethality: '穿甲流', tank: '坦克流', bruiser: '战士流', ad: '物理流' }
 const RARITY_LABEL: Record<string, string> = { prismatic: '棱彩', gold: '金色', silver: '银色' }
+// Augments to avoid on this champion (坑): marks and the data table.
+const pits = ref(new Map<number, { kind: string; note: string }>())
+watch(
+  () => build.value?.champion.key,
+  async (key) => {
+    pits.value = new Map()
+    if (!key) return
+    try {
+      const r = await api.championPitfalls(key)
+      pits.value = new Map(r.pitfalls.map((p) => [p.augment, p]))
+    } catch {
+      /* the lists work without it */
+    }
+  },
+  { immediate: true },
+)
+// This rarity's pitfalls, also those below the cut of the list.
+const pitsBy = (b: Build, r: string) => (b.augments ?? []).filter((a) => a.rarity === r && pits.value.has(a.id))
 function togglePreview(id: number) {
   s.augPreview = s.augPreview.includes(id) ? s.augPreview.filter((x) => x !== id) : [...s.augPreview, id].slice(-4)
 }
@@ -25,10 +43,14 @@ function togglePreview(id: number) {
     <!-- Augments: one box per rarity -->
     <Widget v-for="r in RARITIES" :key="r" :id="'aug-' + r" :w="3" class="aug-col" :class="[r, { compact }]" v-show="build.augments?.length">
       <h2>{{ RARITY_LABEL[r] }}强化 <span class="muted" style="text-transform: none; letter-spacing: 0; margin-left: 8px">{{ build.augScope === 'champion' ? build.champion.name : '全英雄数据' }} · {{ build.augSource ?? 'aramgg' }}</span></h2>
+      <div v-if="pitsBy(build, r).length" class="pitrow">
+        <span class="lab">避坑</span>
+        <span v-for="a in pitsBy(build, r)" :key="a.id" class="pitchip" :class="pits.get(a.id)!.kind" :title="pits.get(a.id)!.note">{{ a.name }}</span>
+      </div>
       <div v-for="a in augBy(build, r)" :key="a.id" class="aug" :class="{ clickable: true, sel: s.augPreview.includes(a.id) }" :title="`${a.desc}\n（点击：在「强化出装」里看选它之后怎么出装）`" @click="togglePreview(a.id)">
         <img v-if="a.icon" :src="a.icon" :alt="a.name" /><span v-else class="noicon" />
         <div class="aug-body">
-          <div class="aug-name"><span class="tier-pip" :class="'t' + a.tier">{{ tierLabel(a.tier) || '?' }}</span>{{ a.name }}</div>
+          <div class="aug-name"><span class="tier-pip" :class="'t' + a.tier">{{ tierLabel(a.tier) || '?' }}</span>{{ a.name }}<span v-if="pits.get(a.id)" class="pit" :class="pits.get(a.id)!.kind" :title="pits.get(a.id)!.note">{{ pits.get(a.id)!.kind === 'mark' ? '坑' : '可能是坑' }}</span></div>
           <div class="aug-desc">{{ a.desc }}</div>
         </div>
         <div class="stat" title="胜率 · 场次 · 选取率"><b>{{ pctf(a.winRate) }}</b>{{ a.games }}场 · {{ pctf(a.pickRate) }}</div>
@@ -114,4 +136,10 @@ button.sm { padding: 4px 8px; font-size: 10px; }
 .tier-pip { font-family: var(--display); font-size: 10px; width: 16px; height: 16px; display: grid; place-items: center; border: 1px solid var(--gold-deep); color: var(--muted); }
 .tier-pip.t1 { color: #ff8a3d; border-color: #ff8a3d; } .tier-pip.t2 { color: var(--gold); border-color: var(--gold); } .tier-pip.t3 { color: var(--hextech-2); border-color: var(--hextech-dim); }
 .noicon { width: 36px; height: 36px; border: 1px solid var(--gold-deep); background: #000; }
+.pit { margin-left: 6px; font-size: 10px; font-weight: 600; padding: 0 6px; border-radius: 999px; color: #fff; background: var(--red); cursor: help; white-space: nowrap; }
+.pit.data { color: var(--red); background: transparent; box-shadow: inset 0 0 0 1px var(--red); }
+.pitrow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 0 0 8px; padding: 6px 8px; border-radius: var(--radius-sm); background: rgba(242, 109, 125, 0.08); font-size: 12px; }
+.pitrow .lab { color: var(--red); font-weight: 600; margin-right: 2px; }
+.pitchip { padding: 1px 8px; border-radius: 999px; color: var(--red); box-shadow: inset 0 0 0 1px var(--red); cursor: help; }
+.pitchip.mark { color: #fff; background: var(--red); box-shadow: none; }
 </style>

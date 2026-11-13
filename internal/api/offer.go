@@ -805,7 +805,8 @@ func (s *Server) checkPitfall(c *offerCard, me *livePlayer, ak *builds.AKChampio
 		return
 	}
 	// Data: the augment helps champions on average, this champion does
-	// clearly worse with it over enough games: it probably cannot trigger it.
+	// clearly worse with it over enough games: it probably cannot trigger it
+	// (thresholds shared with tools/pitscan). A smaller gap is only noted.
 	if ak != nil && d != nil && d.WinRate > 0 {
 		for _, r := range ak.Augments {
 			if r.ID != c.ID || r.Games < 2000 {
@@ -813,9 +814,14 @@ func (s *Server) checkPitfall(c *offerCard, me *livePlayer, ak *builds.AKChampio
 			}
 			mine := builds.Shrink(r.WinRate, r.Games, ak.WinRate) - ak.WinRate
 			avg := d.WinRate - 0.5
-			if avg-mine >= 0.03 && mine < 0 {
-				warn("data", fmt.Sprintf("可能是坑：这个强化平均让英雄胜率 %s，%s 用它却 %s（%s），很可能触发不好它的效果", signedPct(avg), me.Champion.Name, signedPct(r.WinRate-ak.WinRate), games(r.Games)), 0.01)
+			nums := fmt.Sprintf("别的英雄用它平均 %s，%s 用它 %s（%s）", signedPct(avg), me.Champion.Name, signedPct(r.WinRate-ak.WinRate), games(r.Games))
+			switch {
+			case avg-mine >= 0.05 && mine <= -0.03 && r.Games >= 3000:
+				warn("data", "可能是坑："+nums+"，多半触发不了或完全不搭", 0.02)
 				return
+			case avg-mine >= 0.03 && mine < 0:
+				at := min(1, len(c.Reasons))
+				c.Reasons = append(c.Reasons[:at], append([]string{"不太适合：" + nums}, c.Reasons[at:]...)...)
 			}
 		}
 	}

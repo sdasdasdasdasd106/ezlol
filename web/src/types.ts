@@ -88,6 +88,13 @@ export interface OfferCard extends Augment {
   reasons: string[]
 }
 
+/** GET /api/champions/{key}/pitfalls: augments to avoid on one champion. */
+export interface ChampPitfall {
+  augment: number
+  kind: 'mark' | 'data'
+  note: string
+}
+
 /** An augment a champion cannot make use of (GET /api/pitfalls). */
 export interface Pitfall {
   champion: number

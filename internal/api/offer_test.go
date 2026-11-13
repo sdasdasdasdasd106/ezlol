@@ -140,11 +140,18 @@ func TestPitfalls(t *testing.T) {
 	if c.Pitfall != "mark" || c.Score > 0.41 || !strings.HasPrefix(c.Reasons[1], "坑：") {
 		t.Fatalf("builtin: %+v", c)
 	}
-	// Data: helps on average, hurts this champion.
+	// Data, mild: helps on average (+1.3%), hurts this champion (-2.8%): a note.
 	c = card(3086, "蜜蜂来袭！！！")
 	s.checkPitfall(&c, me, ak, &builds.AKAugmentDetail{WinRate: 0.513}, nil)
-	if c.Pitfall != "data" || !strings.HasPrefix(c.Reasons[1], "可能是坑") {
-		t.Fatalf("data: %+v", c)
+	if c.Pitfall != "" || c.Score != 0.5 || !strings.HasPrefix(c.Reasons[1], "不太适合") {
+		t.Fatalf("data mild: %+v", c)
+	}
+	// Data, strong: +2% on average, -8% here over 20000 games.
+	ak.Augments = append(ak.Augments, builds.AKStat{ID: 9, Games: 20000, WinRate: 0.40})
+	c = card(9, "秘术之拳")
+	s.checkPitfall(&c, me, ak, &builds.AKAugmentDetail{WinRate: 0.52}, nil)
+	if c.Pitfall != "data" || c.Score >= 0.5 || !strings.HasPrefix(c.Reasons[1], "可能是坑") {
+		t.Fatalf("data strong: %+v", c)
 	}
 	c = card(5, "普通")
 	s.checkPitfall(&c, me, ak, &builds.AKAugmentDetail{WinRate: 0.50}, map[string]string{"普通": "不适合"})
@@ -170,5 +177,11 @@ func TestPitfalls(t *testing.T) {
 	s2.dataDir = s.dataDir
 	if p := s2.pitfallFor(360, 5); p == nil || p.Note != "打不出暴击" || s2.pitfallFor(360, 1092) != nil {
 		t.Fatalf("reloaded: %+v", p)
+	}
+}
+
+func TestPitTableLoads(t *testing.T) {
+	if dataPits.Version == "" || len(dataPits.Pits) < 100 {
+		t.Fatalf("pit table: version %q, %d pits", dataPits.Version, len(dataPits.Pits))
 	}
 }
