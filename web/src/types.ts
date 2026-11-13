@@ -83,7 +83,20 @@ export interface OfferCard extends Augment {
   fit?: number
   fitOk: boolean
   core?: AugCore
+  /** 坑: the champion cannot make use of it. mark = yours or built in, data = the statistics suggest it, ai = the AI strategy card */
+  pitfall?: 'mark' | 'data' | 'ai'
   reasons: string[]
+}
+
+/** An augment a champion cannot make use of (GET /api/pitfalls). */
+export interface Pitfall {
+  champion: number
+  augment: number
+  note?: string
+  builtin?: boolean
+  championName: string
+  augmentName: string
+  icon?: string
 }
 
 export interface AugmentOffer {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aarlint/ezlol/internal/builds"
+	"github.com/aarlint/ezlol/internal/ddragon"
 	"github.com/aarlint/ezlol/internal/screen"
 	"github.com/aarlint/ezlol/internal/settings"
 	"github.com/aarlint/ezlol/internal/testlog"
@@ -118,5 +119,56 @@ func TestOfferClosesAtNextLevel(t *testing.T) {
 	}
 	if len(s.offer.picks) != 2 {
 		t.Fatalf("picks %+v", s.offer.picks)
+	}
+}
+
+func TestPitfalls(t *testing.T) {
+	s := testServer(t)
+	s.dataDir = t.TempDir()
+	me := &livePlayer{Champion: ddragon.Champion{ID: 360, Name: "莎弥拉"}}
+	ak := &builds.AKChampion{WinRate: 0.479, Augments: []builds.AKStat{
+		{ID: 3086, Games: 26445, WinRate: 0.450}, // bees: +1.3% on average, -2.8% here
+		{ID: 5, Games: 50000, WinRate: 0.49},     // fine
+	}}
+	card := func(id int, name string) offerCard {
+		return offerCard{Augment: builds.Augment{ID: id, Name: name}, Score: 0.5, Reasons: []string{"胜率"}}
+	}
+
+	// Built in: Samira and 弱点.
+	c := card(1092, "弱点")
+	s.checkPitfall(&c, me, ak, nil, nil)
+	if c.Pitfall != "mark" || c.Score > 0.41 || !strings.HasPrefix(c.Reasons[1], "坑：") {
+		t.Fatalf("builtin: %+v", c)
+	}
+	// Data: helps on average, hurts this champion.
+	c = card(3086, "蜜蜂来袭！！！")
+	s.checkPitfall(&c, me, ak, &builds.AKAugmentDetail{WinRate: 0.513}, nil)
+	if c.Pitfall != "data" || !strings.HasPrefix(c.Reasons[1], "可能是坑") {
+		t.Fatalf("data: %+v", c)
+	}
+	c = card(5, "普通")
+	s.checkPitfall(&c, me, ak, &builds.AKAugmentDetail{WinRate: 0.50}, map[string]string{"普通": "不适合"})
+	if c.Pitfall != "ai" {
+		t.Fatalf("ai: %+v", c)
+	}
+
+	// The player removes the built-in one and marks another.
+	post := func(body string) {
+		w := httptest.NewRecorder()
+		s.setPitfall(w, httptest.NewRequest("POST", "/api/pitfalls", strings.NewReader(body)))
+		if w.Code != 200 {
+			t.Fatalf("%s: %d %s", body, w.Code, w.Body)
+		}
+	}
+	post(`{"champion":360,"augment":1092,"on":false}`)
+	post(`{"champion":360,"augment":5,"on":true,"note":"打不出暴击"}`)
+	if s.pitfallFor(360, 1092) != nil || s.pitfallFor(360, 5) == nil {
+		t.Fatal("marks not applied")
+	}
+	// Survives a restart.
+	s2 := testServer(t)
+	s2.dataDir = s.dataDir
+	if p := s2.pitfallFor(360, 5); p == nil || p.Note != "打不出暴击" || s2.pitfallFor(360, 1092) != nil {
+		t.Fatalf("reloaded: %+v", p)
 	}
 }

@@ -50,6 +50,7 @@ type Server struct {
 	keys      *hotkey.Watcher
 	hk        hotkeyState
 	admin     adminCheck
+	pits      pitfallStore
 	ui        fs.FS  // built frontend, may be nil in dev
 	devProxy  string // vite dev server url, may be empty
 }
@@ -74,6 +75,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/game/pick-slot", s.pickSlot)
 	mux.HandleFunc("POST /api/game/scan", s.scanNow)
 	mux.HandleFunc("POST /api/hotkeys", s.setHotkeys)
+	mux.HandleFunc("GET /api/pitfalls", s.listPitfalls)
+	mux.HandleFunc("POST /api/pitfalls", s.setPitfall)
 	mux.HandleFunc("POST /api/hotkeys/fire", s.fireHotkeyHTTP)
 	mux.HandleFunc("GET /api/ai/research", s.aiResearch)
 	mux.HandleFunc("GET /api/champions/{key}/augment-build", s.augmentBuild)

@@ -33,7 +33,21 @@ const cards = computed<OfferCard[]>(() => {
 const bestId = computed(() => offer.value?.offered?.[0]?.id)
 const bestPlace = computed(() => place(cards.value.findIndex((c) => c.id === bestId.value), cards.value.length))
 const RARITY: Record<string, string> = { prismatic: '棱彩', gold: '金色', silver: '银色' }
-const warn = (r: string) => r.startsWith('注意') || r.startsWith('和你现在的装备不太搭')
+const warn = (r: string) => /^(注意|和你现在的装备不太搭|坑：|可能是坑|AI 攻略：尽量别拿)/.test(r)
+const PIT: Record<string, string> = { mark: '坑', data: '可能是坑', ai: 'AI：别拿' }
+
+// Pitfalls: mark an augment this champion cannot make use of (or undo it).
+const champId = computed(() => props.game?.me?.champion.id ?? 0)
+async function markPit(id: number, name: string, on: boolean) {
+  if (!champId.value) return
+  try {
+    await api.setPitfall(champId.value, id, on)
+    toast({ key: 'pit', kind: 'info', title: on ? `已标记：${props.game?.me?.champion.name}用不了「${name}」` : `已取消「${name}」的标记`, body: on ? '以后这个英雄再遇到它，会排到最后并提醒你。' : undefined, ttl: 5000 })
+    emit('refresh')
+  } catch (e) {
+    toast({ key: 'pit', kind: 'error', title: '标记失败', body: (e as Error).message })
+  }
+}
 // The win-rate line is shown as numbers; the build line is shown as icons.
 const reasonsOf = (c: OfferCard) => c.reasons.slice(1).filter((r) => !r.startsWith('推荐核心')).slice(0, 2)
 const aiPick = (name: string) => offer.value?.ai?.status === 'done' && !offer.value.ai.agree && offer.value.ai.pick === name
@@ -131,7 +145,7 @@ watch(
         </div>
 
         <div class="cards">
-          <article v-for="(a, i) in cards" :key="a.id" class="card" :class="[a.rarity, { best: a.id === bestId, chosen: offer.chosen === i + 1 }]" :title="a.desc">
+          <article v-for="(a, i) in cards" :key="a.id" class="card" :class="[a.rarity, { best: a.id === bestId, chosen: offer.chosen === i + 1, pit: a.pitfall === 'mark' }]" :title="a.desc">
             <header>
               <span class="slot">{{ i + 1 }}</span>
               <img v-if="a.icon" class="ico" :src="a.icon" :alt="a.name" /><span v-else class="ico" />
@@ -139,6 +153,7 @@ watch(
                 <div class="name">{{ a.name }}</div>
                 <div class="rar">{{ RARITY[a.rarity] ?? '' }}</div>
               </div>
+              <span v-if="a.pitfall" class="tag pit" :class="a.pitfall">{{ PIT[a.pitfall] }}</span>
               <span v-if="a.id === bestId" class="tag">推荐</span>
               <span v-else-if="aiPick(a.name)" class="tag ai">AI 推荐</span>
             </header>
@@ -160,6 +175,9 @@ watch(
                 <img v-if="a.core.boots?.image" :src="a.core.boots.image" :title="a.core.boots.name" class="boots" />
               </div>
             </footer>
+            <button class="pitbtn" :title="a.pitfall === 'mark' ? '取消标记' : '这个英雄触发不了它的效果：标记后以后都排到最后'" @click="markPit(a.id, a.name, a.pitfall !== 'mark')">
+              {{ a.pitfall === 'mark' ? '取消「坑」标记' : '这个英雄用不了？标记为坑' }}
+            </button>
           </article>
         </div>
         <p class="hint">选完按 <kbd>{{ pickKeys }}</kbd>（左 / 中 / 右）记下选的是哪个，下面的出装按它推荐；不按就记为推荐的那个。</p>
@@ -177,6 +195,7 @@ watch(
           <span v-if="fixing === p.stage" class="fix">
             <button v-for="o in p.offered" :key="o.id" class="fixbtn" :class="{ active: o.id === p.augmentId }" @click="correct(p, o.id)">{{ o.name }}</button>
             <button class="fixbtn danger" title="这条记录是错的（其实没选过）：删掉它" @click="correct(p, 0)">删除</button>
+            <button class="fixbtn" title="这个英雄触发不了它的效果：以后排到最后并提醒" @click="markPit(p.augmentId, p.name, true)">用不了，标记为坑</button>
           </span>
         </span>
       </div>
@@ -224,6 +243,11 @@ kbd { font-family: inherit; font-size: 11px; padding: 1px 6px; border-radius: 5p
 .card.prismatic .rar { color: var(--rarity-prismatic); } .card.gold .rar { color: var(--rarity-gold); } .card.silver .rar { color: var(--rarity-silver); }
 .tag { flex: none; align-self: flex-start; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; color: var(--btn-primary-text); background: var(--accent); }
 .tag.ai { background: var(--amber); color: #1a1405; }
+.tag.pit { background: var(--red); color: #fff; }
+.tag.pit.data, .tag.pit.ai { background: transparent; color: var(--red); box-shadow: inset 0 0 0 1px var(--red); }
+.card.pit { opacity: .7; border-color: var(--red); }
+.pitbtn { align-self: flex-start; padding: 2px 8px; min-height: 0; font-size: 11px; border-radius: 999px; background: transparent; border-color: transparent; color: var(--dim); text-transform: none; letter-spacing: 0; }
+.pitbtn:hover:not(:disabled) { color: var(--red); border-color: var(--red); background: transparent; }
 .wr { display: flex; align-items: baseline; gap: 8px; }
 .wr b { font-size: 20px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
 .wr .up { font-size: 12px; color: var(--green); } .wr .down { font-size: 12px; color: var(--red); }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from '../api'
-import type { SettingsView, UpdateInfo } from '../types'
+import type { Pitfall, SettingsView, UpdateInfo } from '../types'
 import { DEFAULT_HOTKEYS, hotkeyFromEvent, prettyHotkey } from '../api'
 import type { AppSettings, Hotkeys } from '../api'
 import * as sound from '../sound'
@@ -134,8 +134,28 @@ function flash(text: string, kind: 'ok' | 'err') {
   msgTimer = setTimeout(() => (msg.value = ''), 2500)
 }
 
+// Augments marked as unusable for a champion (坑).
+const pits = ref<Pitfall[]>([])
+async function loadPits() {
+  try {
+    pits.value = await api.pitfalls()
+  } catch {
+    pits.value = []
+  }
+}
+async function unmarkPit(p: Pitfall) {
+  try {
+    await api.setPitfall(p.champion, p.augment, false)
+    await loadPits()
+    flash('已取消标记', 'ok')
+  } catch (e) {
+    flash(errText(e), 'err')
+  }
+}
+
 async function load() {
   loadError.value = ''
+  void loadPits()
   let view: SettingsView
   try {
     view = await api.settings()
@@ -287,6 +307,24 @@ onBeforeUnmount(() => {
                   <span class="track" aria-hidden="true" /><span class="state">{{ s.ocr && s.ocrAvailable ? '开' : '关' }}</span>
                 </button>
               </dd>
+            </div>
+            <div class="setting pits">
+              <dt>
+                <span class="lbl">避坑：英雄用不了的强化</span>
+                <span class="desc muted">
+                  有些强化某些英雄触发不了（比如莎弥拉拿「弱点」）。识别时这些强化会标红「坑」并排到最后：你在强化卡片上点过「标记为坑」的，加上内置的；
+                  另外，数据显示「这个强化平均是加分、这个英雄用却减分」的会标「可能是坑」，AI 攻略里「尽量别拿」的标「AI：别拿」。
+                </span>
+                <ul v-if="pits.length" class="pitlist">
+                  <li v-for="p in pits" :key="p.champion + '-' + p.augment">
+                    <img v-if="p.icon" :src="p.icon" alt="" />
+                    <b>{{ p.championName || p.champion }}</b> · {{ p.augmentName || p.augment }}
+                    <span v-if="p.note" class="muted">（{{ p.note }}）</span>
+                    <button type="button" class="sm" @click="unmarkPit(p)">取消</button>
+                  </li>
+                </ul>
+                <span v-else class="desc muted">还没有标记。</span>
+              </dt>
             </div>
           </dl>
 
@@ -628,6 +666,11 @@ onBeforeUnmount(() => {
 /* Every control shares one height so each row reads as a single line */
 .setting input { height: var(--ctl-h); padding: 0 var(--sp-3); }
 .setting .short { flex: none; width: 96px; }
+.setting.pits { grid-template-columns: 1fr; }
+.pitlist { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; font-size: 12px; }
+.pitlist li { display: flex; align-items: center; gap: 6px; }
+.pitlist img { width: 20px; height: 20px; border-radius: 4px; }
+.body .pitlist button.sm { height: 22px; padding: 0 8px; font-size: 11px; margin-left: auto; }
 .seg { display: inline-flex; padding: 3px; gap: 3px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-input); }
 .body .seg button { height: calc(var(--ctl-h) - 8px); border: 0; background: transparent; box-shadow: none; color: var(--muted); }
 .body .seg button.on { background: var(--panel-2); color: var(--text); box-shadow: 0 0 0 1px var(--border); }

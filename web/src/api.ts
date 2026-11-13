@@ -1,4 +1,4 @@
-import type { AugBuildResponse, AugPick, Build, Champion, Research, ChampionInfo, Game, Mastery, PlayRecord, SettingsView, Status, UpdateInfo } from './types'
+import type { AugBuildResponse, AugPick, Pitfall, Build, Champion, Research, ChampionInfo, Game, Mastery, PlayRecord, SettingsView, Status, UpdateInfo } from './types'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...init })
@@ -15,6 +15,10 @@ export const api = {
   /** Read the augment cards on screen now (the scan hotkey / button). status ai = the AI is reading the text. */
   /** wait: the game is minimized (exclusive fullscreen); capture once the player is back in it. */
   scanNow: (wait = false) => req<{ status: 'ok' | 'ai'; best?: string; names?: string[]; message?: string }>('/api/game/scan', { method: 'POST', body: JSON.stringify({ wait }) }),
+  pitfalls: () => req<Pitfall[]>('/api/pitfalls'),
+  /** Mark (on) or unmark an augment as one this champion cannot make use of. */
+  setPitfall: (champion: number, augment: number, on: boolean, note = '') =>
+    req<{ ok: boolean }>('/api/pitfalls', { method: 'POST', body: JSON.stringify({ champion, augment, on, note }) }),
   correctPick: (stage: number, augmentId: number) => req<AugPick[]>('/api/game/pick', { method: 'POST', body: JSON.stringify({ stage, augmentId }) }),
   augmentBuild: (champion: number, augments: number[], owned: number[]) =>
     req<AugBuildResponse>(`/api/champions/${champion}/augment-build?augments=${augments.join(',')}&owned=${owned.join(',')}`),

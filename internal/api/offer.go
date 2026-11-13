@@ -31,7 +31,8 @@ type offerCard struct {
 	Fit        float64         `json:"fit,omitempty"`        // your items: win rate with this augment vs without
 	FitOK      bool            `json:"fitOk"`
 	FitGames   int             `json:"fitGames,omitempty"`
-	Core       *builds.AugCore `json:"core,omitempty"` // what people build after taking it
+	Core       *builds.AugCore `json:"core,omitempty"`    // what people build after taking it
+	Pitfall    string          `json:"pitfall,omitempty"` // 坑: mark (the player's / built in) | data | ai
 	Reasons    []string        `json:"reasons"`
 }
 
@@ -685,18 +686,24 @@ func (s *Server) rankMayhem(ctx context.Context, me *livePlayer, stage int, offe
 		names[p.AugmentID] = p.Name
 	}
 	stageLabel := map[int]string{1: "开局", 2: "7 级", 3: "11 级", 4: "15 级"}[stage]
-	// All-champion augment details (pairs) for the picked and offered augments.
+	// All-champion augment details: pairs for the picked augments, and for the
+	// offered ones how much they help champions on average (pitfall check).
 	details := map[int]*builds.AKAugmentDetail{}
-	if len(pickedIDs) > 0 {
-		for _, id := range pickedIDs {
-			if d, err := s.community.AramkitAugmentDetail(ctx, id); err == nil {
-				details[id] = d
-			}
+	for _, id := range pickedIDs {
+		if d, err := s.community.AramkitAugmentDetail(ctx, id); err == nil {
+			details[id] = d
 		}
-		for _, a := range offered {
-			if d, err := s.community.AramkitAugmentDetail(ctx, a.ID); err == nil {
-				details[a.ID] = d
-			}
+	}
+	for _, a := range offered {
+		if d, err := s.community.AramkitAugmentDetail(ctx, a.ID); err == nil {
+			details[a.ID] = d
+		}
+	}
+	// The AI strategy card's "avoid" list, when there is one.
+	avoid := map[string]string{}
+	if rv := s.cachedResearch(me.Champion.ID); rv != nil && rv.Strategy != nil {
+		for _, a := range rv.Strategy.Avoid {
+			avoid[a.Name] = a.Why
 		}
 	}
 	for _, a := range offered {
@@ -773,10 +780,48 @@ func (s *Server) rankMayhem(ctx context.Context, me *livePlayer, stage int, offe
 				}
 			}
 		}
+		s.checkPitfall(&c, me, ak, details[a.ID], avoid)
 		cards = append(cards, c)
 	}
 	sort.SliceStable(cards, func(i, j int) bool { return cards[i].Score > cards[j].Score })
 	return cards, "aramkit"
+}
+
+// checkPitfall flags an augment this champion cannot make use of (see
+// pitfalls.go) and puts the warning right after the win-rate line.
+func (s *Server) checkPitfall(c *offerCard, me *livePlayer, ak *builds.AKChampion, d *builds.AKAugmentDetail, avoid map[string]string) {
+	warn := func(kind, text string, penalty float64) {
+		c.Pitfall = kind
+		c.Score -= penalty
+		at := min(1, len(c.Reasons))
+		c.Reasons = append(c.Reasons[:at], append([]string{text}, c.Reasons[at:]...)...)
+	}
+	if p := s.pitfallFor(me.Champion.ID, c.ID); p != nil {
+		note := p.Note
+		if note == "" {
+			note = "你标记过这个英雄用不了它"
+		}
+		warn("mark", "坑："+note, 0.10)
+		return
+	}
+	// Data: the augment helps champions on average, this champion does
+	// clearly worse with it over enough games: it probably cannot trigger it.
+	if ak != nil && d != nil && d.WinRate > 0 {
+		for _, r := range ak.Augments {
+			if r.ID != c.ID || r.Games < 2000 {
+				continue
+			}
+			mine := builds.Shrink(r.WinRate, r.Games, ak.WinRate) - ak.WinRate
+			avg := d.WinRate - 0.5
+			if avg-mine >= 0.03 && mine < 0 {
+				warn("data", fmt.Sprintf("可能是坑：这个强化平均让英雄胜率 %s，%s 用它却 %s（%s），很可能触发不好它的效果", signedPct(avg), me.Champion.Name, signedPct(r.WinRate-ak.WinRate), games(r.Games)), 0.01)
+				return
+			}
+		}
+	}
+	if why, ok := avoid[c.Name]; ok {
+		warn("ai", "AI 攻略：尽量别拿（"+why+"）", 0.01)
+	}
 }
 
 // correctPick replaces the assumed augment of a stage with the one actually
