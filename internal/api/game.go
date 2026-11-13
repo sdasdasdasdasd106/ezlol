@@ -8,10 +8,13 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/aarlint/ezlol/internal/builds"
 	"github.com/aarlint/ezlol/internal/ddragon"
 	"github.com/aarlint/ezlol/internal/live"
+	"github.com/aarlint/ezlol/internal/screen"
 )
 
 // livePlayer is the little the augment assistant needs about each player.
@@ -40,6 +43,9 @@ type liveResponse struct {
 	OCR      string        `json:"ocr"`                // available | disabled | unavailable | error text
 	OCRLang  string        `json:"ocrLang"`            // language the OCR helper reads, e.g. zh-Hans-CN
 	Research *researchView `json:"research,omitempty"` // AI strategy card for this champion
+	// The game runs as administrator and ezlol does not: hotkeys cannot reach
+	// ezlol while the game has focus.
+	NeedAdmin bool `json:"needAdmin,omitempty"`
 }
 
 // game reports your champion and level in the running game, plus the augment
@@ -63,7 +69,28 @@ func (s *Server) game(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	resp.Picks = s.Picks()
+	resp.NeedAdmin = s.gameNeedsAdmin()
 	writeJSON(w, 200, resp)
+}
+
+// adminCheck caches whether the game runs as administrator (checked every 30 s).
+type adminCheck struct {
+	mu   sync.Mutex
+	at   time.Time
+	need bool
+}
+
+func (s *Server) gameNeedsAdmin() bool {
+	a := &s.admin
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if time.Since(a.at) > 30*time.Second {
+		a.at, a.need = time.Now(), screen.GameNeedsAdmin()
+		if a.need {
+			s.tlog.Log("need-admin", map[string]any{"why": "the game runs as administrator, ezlol does not"})
+		}
+	}
+	return a.need
 }
 
 // liveState reads the running game from the live client API (InGame false

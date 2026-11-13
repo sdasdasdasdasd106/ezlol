@@ -15,9 +15,5 @@ contextBridge.exposeInMainWorld('ezlol', {
   suspendHotkeys: (on) => ipcRenderer.invoke('hotkeys:suspend', !!on),
   resetHotkeys: () => ipcRenderer.invoke('hotkeys:defaults'),
   testVoice: () => ipcRenderer.invoke('voice:test'),
-  // A hotkey changed the game state (scan, pick): poll now instead of waiting.
-  onGameRefresh: (fn) => ipcRenderer.on('game:refresh', () => fn()),
-  // What a hotkey did, to show (and speak when say is set).
-  onHotkeyResult: (fn) => ipcRenderer.on('hotkey:result', (_e, text, say) => fn(String(text), !!say)),
   onSay: (fn) => ipcRenderer.on('voice:say', (_e, text, force) => fn(String(text), !!force)),
 })

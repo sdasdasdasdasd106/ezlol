@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import { CATALOG, DASH_KEY, DashboardGrid, type ModeKey } from './dashboard'
 import GhostWidget from './components/GhostWidget.vue'
-import { api, isElectron, subscribe } from './api'
+import { api, isElectron, subscribe, type HotkeyEvent } from './api'
 import * as sound from './sound'
 import type { Champion, Game, Status } from './types'
 import BuildPanel from './components/BuildPanel.vue'
@@ -101,13 +101,13 @@ async function pollGame() {
   }
   gameTimer = window.setTimeout(pollGame, game.value?.inGame ? 1500 : 4000)
 }
-// A hotkey (scan, pick) changed the game state: show it now.
-window.ezlol?.onGameRefresh?.(() => void pollGame())
-// What a hotkey did: a toast for when the player switches out, spoken if asked.
-window.ezlol?.onHotkeyResult?.((text, speak) => {
-  toast({ key: 'hotkey', kind: speak ? 'error' : 'info', title: text, ttl: 8000 })
-  if (speak) say(text.split(/[（(]/)[0].slice(0, 40), { interrupt: true })
-})
+// What a hotkey did (the backend runs every hotkey and tells us over SSE):
+// a toast for when the player switches out, spoken if asked, and the new state.
+function onHotkey(h: HotkeyEvent) {
+  toast({ key: 'hotkey', kind: h.ok ? 'info' : 'error', title: h.text, ttl: 8000 })
+  if (h.say) say(h.text.split(/[（(]/)[0].slice(0, 40), { interrupt: true })
+  void pollGame()
+}
 // Optional voice (Settings): the recommendation and the next item, spoken.
 window.ezlol?.getAppSettings?.().then((a) => setVoice(!!a.voice)).catch(() => {})
 window.ezlol?.onAppSettings?.((a) => setVoice(!!a.voice))
@@ -124,7 +124,7 @@ onMounted(async () => {
   } catch (e) {
     error.value = (e as Error).message
   }
-  unsub = subscribe(onStatus)
+  unsub = subscribe(onStatus, onHotkey)
   void pollGame()
   if (!params.get('quiet')) {
     setTimeout(checkUpdateSoon, 4000)

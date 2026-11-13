@@ -49,13 +49,15 @@ const pickKeys = computed(() => {
 })
 
 // The same as the scan hotkey, for a windowed game or a second screen.
+// The game minimizes when you switch out of exclusive fullscreen: the capture
+// waits until the player is back in the game.
 const scanning = ref(false)
 const scanMsg = ref('')
 async function scanNow() {
   scanning.value = true
   scanMsg.value = ''
   try {
-    const r = await api.scanNow()
+    const r = await api.scanNow(true)
     scanMsg.value = r.status === 'ai' ? (r.message ?? 'AI 正在推断…') : ''
   } catch (e) {
     scanMsg.value = (e as Error).message
@@ -102,10 +104,16 @@ watch(
     <h2 class="hd">
       强化推荐<span v-if="game?.me" class="sub">{{ game.me.champion.name }} · {{ game.me.level }} 级</span>
       <button v-if="canScan" class="scan" :disabled="scanning" :title="`截屏识别现在屏幕上的强化（游戏里按 ${scanKey}）`" @click="scanNow">
-        {{ scanning ? '识别中…' : '立即识别' }}<kbd>{{ scanKey }}</kbd>
+        {{ scanning ? '等你切回游戏…' : '立即识别' }}<kbd>{{ scanKey }}</kbd>
       </button>
     </h2>
+    <div v-if="scanning" class="msg ok">现在切回游戏（Alt+Tab），游戏画面出现后会自动截屏识别，再切出来看结果。</div>
     <div v-if="scanMsg" class="msg">{{ scanMsg }}</div>
+    <div v-if="game?.needAdmin" class="msg admin">
+      英雄联盟是以<b>管理员身份</b>运行的，ezlol 不是：Windows 不让 ezlol 读到游戏里的按键，快捷键会没反应。
+      请关掉 ezlol，右键它的图标选「以管理员身份运行」（想一直这样：右键 → 属性 → 兼容性 → 勾选「以管理员身份运行此程序」）。
+      在那之前可以用上面的「立即识别」按钮。
+    </div>
 
     <div v-if="!game?.inGame" class="empty">进入海克斯乱斗后，选强化时按 <kbd>{{ scanKey }}</kbd>，切出来在这里看推荐。</div>
     <div v-else-if="mode !== 'aram'" class="empty">这不是海克斯乱斗对局，没有强化可选。</div>
@@ -185,6 +193,8 @@ kbd { font-family: inherit; font-size: 11px; padding: 1px 6px; border-radius: 5p
 .empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
 .empty.due { color: var(--text); padding: 10px 12px; border-radius: var(--radius-sm); background: var(--accent-soft); }
 .msg { font-size: 12px; color: var(--amber); margin: 4px 0 8px; }
+.msg.ok { color: var(--accent); }
+.msg.admin { color: var(--text); line-height: 1.6; padding: 8px 10px; border-radius: var(--radius-sm); background: rgba(242, 184, 75, 0.1); border-left: 3px solid var(--amber); }
 
 .hero { margin: 2px 0 12px; }
 .kicker { font-size: 12px; color: var(--muted); }

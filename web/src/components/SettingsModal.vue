@@ -46,7 +46,7 @@ const recording = ref<keyof Hotkeys | null>(null)
 const recHint = ref('')
 async function startRecord(k: keyof Hotkeys) {
   recording.value = k
-  recHint.value = '按下新的组合键…（Esc 取消）'
+  recHint.value = '按下新的组合键或鼠标侧键…（Esc 取消）'
   await window.ezlol?.suspendHotkeys?.(true)
 }
 async function stopRecord() {
@@ -70,7 +70,20 @@ function onRecordKey(e: KeyboardEvent, k: keyof Hotkeys) {
     recHint.value = r.error
     return
   }
-  const accel = r.accel!
+  useRecorded(k, r.accel!)
+}
+// Mouse side buttons (back = Mouse4, forward = Mouse5), alone or with modifiers.
+function onRecordMouse(e: MouseEvent, k: keyof Hotkeys) {
+  if (recording.value !== k || (e.button !== 3 && e.button !== 4)) return
+  e.preventDefault()
+  e.stopPropagation()
+  const mods: string[] = []
+  if (e.ctrlKey) mods.push('CommandOrControl')
+  if (e.altKey) mods.push('Alt')
+  if (e.shiftKey) mods.push('Shift')
+  useRecorded(k, [...mods, e.button === 3 ? 'Mouse4' : 'Mouse5'].join('+'))
+}
+function useRecorded(k: keyof Hotkeys, accel: string) {
   const other = HOTKEY_ROWS.find((row) => row.key !== k && appS.value?.hotkeys[row.key] === accel)
   if (other) {
     recHint.value = `${prettyKey(accel)} 已经用在「${other.label}」上了，换一个`
@@ -486,7 +499,8 @@ onBeforeUnmount(() => {
 
             <h3>游戏内快捷键</h3>
             <p class="muted lead">
-              游戏是独占全屏，ezlol 不往游戏上叠窗口：按快捷键识别后，切出来（Alt+Tab）在这个窗口看推荐；也可以打开语音，不用切出来。快捷键在全屏游戏里照样能用。
+              游戏是独占全屏，ezlol 不往游戏上叠窗口：按快捷键识别后，切出来（Alt+Tab）在这个窗口看推荐；也可以打开语音，不用切出来。
+              ezlol 直接读键盘和鼠标的按键状态（和 OBS 的快捷键一样），全屏游戏里也能用；如果英雄联盟是以管理员身份运行的，ezlol 也要以管理员身份运行。
             </p>
             <dl class="rows">
               <div class="setting">
@@ -505,7 +519,7 @@ onBeforeUnmount(() => {
                 <dt>
                   <span class="lbl">{{ r.label }}</span>
                   <span v-if="recording === r.key" class="desc ok">{{ recHint }}</span>
-                  <span v-else-if="appS.hotkeyErrors?.includes(appS.hotkeys[r.key])" class="desc warn">{{ prettyKey(appS.hotkeys[r.key]) }} 被别的程序（QQ、微信、显卡软件等）占用了，点右边换一个。</span>
+                  <span v-else-if="appS.hotkeyErrors?.includes(appS.hotkeys[r.key])" class="desc warn">{{ prettyKey(appS.hotkeys[r.key]) }} 也被别的程序（QQ、微信、显卡软件等）占用了：ezlol 照样能读到，但那个程序也会响应，最好换一个。</span>
                   <span v-else-if="r.desc" class="desc muted">{{ r.desc }}</span>
                 </dt>
                 <dd>
@@ -516,6 +530,9 @@ onBeforeUnmount(() => {
                     :title="recording === r.key ? '按下新的组合键，Esc 取消' : '点一下，然后按下新的组合键'"
                     @click="recording === r.key ? stopRecord() : startRecord(r.key)"
                     @keydown="onRecordKey($event, r.key)"
+                    @mousedown="onRecordMouse($event, r.key)"
+                    @mouseup.prevent
+                    @auxclick.prevent
                     @blur="recording === r.key && stopRecord()"
                   >
                     {{ recording === r.key ? '请按键…' : prettyKey(appS.hotkeys[r.key]) }}
@@ -527,7 +544,7 @@ onBeforeUnmount(() => {
                   <span class="lbl">恢复默认快捷键</span>
                   <span class="desc muted">
                     默认 {{ defaultKeys }}。不用 Ctrl+Shift：中文 Windows 里它会切换输入法，游戏里可能卡住按键。
-                    也可以设成 F7、F8 这样的单键（笔记本可能要同时按 Fn）；单键在 ezlol 开着时别的程序就收不到了。
+                    也可以设成 F7、F8 这样的单键（笔记本可能要同时按 Fn），或者鼠标侧键（录入时按一下侧键）。
                   </span>
                 </dt>
                 <dd>

@@ -46,9 +46,10 @@ const appSettingsPath = () => path.join(app.getPath('userData'), 'app-settings.j
 
 /**
  * Checks a hotkey and returns it in canonical accelerator form, or null.
- * Keys: A-Z, 0-9, F1-F24, num0-num9. Letters and digits need Ctrl or Alt (a
- * bare key, or Shift+key, would be taken from normal typing everywhere);
- * F-keys and numpad keys may be used alone. Windows reserves F12 for debuggers.
+ * Keys: A-Z, 0-9, F1-F24, num0-num9, Mouse4 / Mouse5 (side buttons). Letters
+ * and digits need Ctrl or Alt (a bare key, or Shift+key, would be taken from
+ * normal typing everywhere); F-keys, numpad keys and side buttons may be used
+ * alone. Windows reserves F12 for debuggers.
  */
 function normalizeHotkey(raw) {
   if (typeof raw !== 'string' || raw.length > 60) return null
@@ -79,8 +80,9 @@ function normalizeHotkey(raw) {
   else if (/^[0-9]$/.test(key)) k = key
   else if (/^f([1-9]|1[0-9]|2[0-4])$/i.test(key)) k = key.toUpperCase()
   else if (/^num[0-9]$/i.test(key)) k = key.toLowerCase()
+  else if (/^mouse[45]$/i.test(key)) k = 'Mouse' + key.slice(-1)
   if (!k) return null
-  const standalone = /^F\d+$/.test(k) || /^num\d$/.test(k)
+  const standalone = /^F\d+$/.test(k) || /^num\d$/.test(k) || /^Mouse\d$/.test(k)
   if (!standalone && !mods.has('CommandOrControl') && !mods.has('Control') && !mods.has('Alt')) return null
   if (k === 'F12' && process.platform === 'win32') return null
   return [...['CommandOrControl', 'Control', 'Alt', 'Shift'].filter((m) => mods.has(m)), k].join('+')
@@ -188,7 +190,7 @@ function setAppSettings(patch) {
       const v = patch.hotkeys[k]
       if (v === undefined || v === hk[k]) continue
       const n = normalizeHotkey(v)
-      if (!n) throw new Error(`「${v}」不能用作快捷键：字母和数字要配 Ctrl 或 Alt，F1–F11 和小键盘数字可以单独用`)
+      if (!n) throw new Error(`「${v}」不能用作快捷键：字母和数字要配 Ctrl 或 Alt，F1–F11、小键盘数字和鼠标侧键可以单独用`)
       hk[k] = n
     }
     const seen = {}
@@ -211,16 +213,17 @@ ipcMain.handle('app-settings:get', () => appSettingsView())
 
 let hotkeyErrors = []
 
-// ---- Hotkey results: shown in the window (the player switches out to it) and spoken if the voice is on ----
-function hotkeyResult(text, say = false) {
-  if (win) win.webContents.send('hotkey:result', String(text || ''), !!say)
-}
 ipcMain.handle('voice:test', () => {
   if (win) win.webContents.send('voice:say', '语音播报正常。推荐中间的，大法师。', true)
   return true
 })
 
 // ---- Global hotkeys (work while the game has focus, even fullscreen) ----
+// Two ways in, both handled by the backend, which runs the action once per
+// press and sends the result to the window (SSE "hotkey"):
+//   - the backend reads the keyboard state itself (Windows; what OBS does):
+//     this still works when a fullscreen game switches registered hotkeys off;
+//   - Electron's globalShortcut (RegisterHotKey), which forwards to the backend.
 function postJSON(pathname, body, timeoutMs = 3000) {
   return new Promise((resolve) => {
     const data = JSON.stringify(body)
@@ -242,34 +245,8 @@ function postJSON(pathname, body, timeoutMs = 3000) {
   })
 }
 
-function refreshGame() {
-  if (win) win.webContents.send('game:refresh')
-}
-
-async function pickSlot(n) {
-  const r = await postJSON('/api/game/pick-slot', { slot: n })
-  if (r.status === 200) hotkeyResult(`已记录：选了第 ${n} 个「${r.body.augment || ''}」`)
-  else hotkeyResult(r.body.error || '标记失败', true)
-  refreshGame()
-}
-
-// The player says the augment choice is open: capture and read it right now.
-// A read offer is spoken by the window when it shows up.
-let scanning = false
-async function scanNow() {
-  if (scanning) return
-  scanning = true
-  try {
-    // The first scan of a session also starts the OCR helper: allow it time.
-    const r = await postJSON('/api/game/scan', {}, 20000)
-    if (r.status === 200) hotkeyResult(`识别到：${(r.body.names || []).join(' / ')}，推荐「${r.body.best || ''}」`)
-    else if (r.status === 202) hotkeyResult(r.body.message || '没认全，AI 正在推断', true)
-    else hotkeyResult(r.body.error || '识别失败', true)
-  } finally {
-    scanning = false
-    refreshGame()
-  }
-}
+const fireHotkey = (action) => postJSON('/api/hotkeys/fire', { action })
+const isMouse = (acc) => /^(.+\+)?Mouse[45]$/.test(acc)
 
 let hotkeysSuspended = false
 let resumeTimer = null
@@ -277,28 +254,28 @@ function registerHotkeys() {
   globalShortcut.unregisterAll()
   hotkeyErrors = []
   const hk = appSettings.hotkeys
+  void postJSON('/api/hotkeys', { bindings: hk, suspended: hotkeysSuspended })
   if (hotkeysSuspended) return
-  const reg = (acc, fn) => {
+  for (const action of Object.keys(HOTKEY_DEFAULTS)) {
+    const acc = hk[action]
+    if (!acc || isMouse(acc)) continue // mouse buttons: only the backend can read them
     try {
-      if (!globalShortcut.register(acc, fn)) hotkeyErrors.push(acc)
+      if (!globalShortcut.register(acc, () => fireHotkey(action))) hotkeyErrors.push(acc)
     } catch {
       hotkeyErrors.push(acc)
     }
   }
-  reg(hk.scan, scanNow)
-  reg(hk.pick1, () => pickSlot(1))
-  reg(hk.pick2, () => pickSlot(2))
-  reg(hk.pick3, () => pickSlot(3))
 }
 // While a new hotkey is being recorded in Settings, the global ones are let
 // go: otherwise pressing a combination that is already registered would be
-// taken by the hotkey and never reach the recorder.
+// taken by the hotkey (and run it) and never reach the recorder.
 function suspendHotkeys(on) {
   clearTimeout(resumeTimer)
   if (hotkeysSuspended === on) return
   hotkeysSuspended = on
   if (on) {
     globalShortcut.unregisterAll()
+    void postJSON('/api/hotkeys', { suspended: true })
     resumeTimer = setTimeout(() => suspendHotkeys(false), 30000)
   } else {
     registerHotkeys()

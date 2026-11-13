@@ -39,7 +39,7 @@ type LogEntry struct {
 
 // Event is what SSE subscribers receive.
 type Event struct {
-	Type string          `json:"type"` // status | log
+	Type string          `json:"type"` // status | log | hotkey
 	Data json.RawMessage `json:"data"`
 }
 
@@ -102,6 +102,9 @@ func (w *Watcher) Subscribe() (<-chan Event, func()) {
 		w.mu.Unlock()
 	}
 }
+
+// Publish sends an event to every SSE subscriber (also used for hotkey results).
+func (w *Watcher) Publish(ev Event) { w.publish(ev) }
 
 func (w *Watcher) publish(ev Event) {
 	w.mu.RLock()

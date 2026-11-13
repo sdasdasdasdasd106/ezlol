@@ -13,7 +13,8 @@ export const api = {
   build: (key: string) => req<Build>(`/api/champions/${encodeURIComponent(key)}/build`),
   game: () => req<Game>('/api/game'),
   /** Read the augment cards on screen now (the scan hotkey / button). status ai = the AI is reading the text. */
-  scanNow: () => req<{ status: 'ok' | 'ai'; best?: string; names?: string[]; message?: string }>('/api/game/scan', { method: 'POST' }),
+  /** wait: the game is minimized (exclusive fullscreen); capture once the player is back in it. */
+  scanNow: (wait = false) => req<{ status: 'ok' | 'ai'; best?: string; names?: string[]; message?: string }>('/api/game/scan', { method: 'POST', body: JSON.stringify({ wait }) }),
   correctPick: (stage: number, augmentId: number) => req<AugPick[]>('/api/game/pick', { method: 'POST', body: JSON.stringify({ stage, augmentId }) }),
   augmentBuild: (champion: number, augments: number[], owned: number[]) =>
     req<AugBuildResponse>(`/api/champions/${champion}/augment-build?augments=${augments.join(',')}&owned=${owned.join(',')}`),
@@ -31,9 +32,20 @@ export const api = {
 }
 
 /** Live client status over SSE (connection, phase, queue, picked champion). */
-export function subscribe(onStatus: (s: Status) => void): () => void {
+/** What a hotkey did (sent by the backend, which runs every hotkey). */
+export interface HotkeyEvent {
+  action: string
+  ok: boolean
+  text: string
+  /** speak it (errors; a read offer is spoken from the game state) */
+  say: boolean
+}
+
+/** Live client status over SSE (connection, phase, queue, picked champion), and hotkey results. */
+export function subscribe(onStatus: (s: Status) => void, onHotkey?: (h: HotkeyEvent) => void): () => void {
   const es = new EventSource('/api/events')
   es.addEventListener('status', (e) => onStatus(JSON.parse((e as MessageEvent).data)))
+  if (onHotkey) es.addEventListener('hotkey', (e) => onHotkey(JSON.parse((e as MessageEvent).data)))
   return () => es.close()
 }
 
@@ -78,8 +90,6 @@ declare global {
       suspendHotkeys?: (on: boolean) => Promise<AppSettings>
       resetHotkeys?: () => Promise<AppSettings>
       testVoice?: () => Promise<boolean>
-      onGameRefresh?: (fn: () => void) => void
-      onHotkeyResult?: (fn: (text: string, say: boolean) => void) => void
       onSay?: (fn: (text: string, force: boolean) => void) => void
     }
   }
@@ -99,6 +109,8 @@ export function prettyHotkey(k: string | undefined): string {
     .replace('CommandOrControl', mac ? 'Cmd' : 'Ctrl')
     .replace('Control', 'Ctrl')
     .replace(/num(\d)/, '小键盘$1')
+    .replace('Mouse4', '鼠标侧键（后）')
+    .replace('Mouse5', '鼠标侧键（前）')
 }
 
 /** The default hotkeys, for display before the desktop shell reports its own. */

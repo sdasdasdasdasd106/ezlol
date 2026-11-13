@@ -18,6 +18,7 @@ import (
 	"github.com/aarlint/ezlol/internal/ai"
 	"github.com/aarlint/ezlol/internal/builds"
 	"github.com/aarlint/ezlol/internal/ddragon"
+	"github.com/aarlint/ezlol/internal/hotkey"
 	"github.com/aarlint/ezlol/internal/live"
 	"github.com/aarlint/ezlol/internal/screen"
 	"github.com/aarlint/ezlol/internal/settings"
@@ -46,6 +47,9 @@ type Server struct {
 	aiSt      aiState
 	upload    uploadState
 	offer     offerState
+	keys      *hotkey.Watcher
+	hk        hotkeyState
+	admin     adminCheck
 	ui        fs.FS  // built frontend, may be nil in dev
 	devProxy  string // vite dev server url, may be empty
 }
@@ -53,7 +57,9 @@ type Server struct {
 // New wires a server.
 func New(log *slog.Logger, w *watcher.Watcher, dd *ddragon.Store, community *builds.Community, cfg *settings.Store, upd *update.Checker, tlog *testlog.Logger, dataDir, repo, version string, ui fs.FS, devProxy string) *Server {
 	aic := newAIClient(dataDir, func() string { return cfg.Get().DeepSeekKey })
-	return &Server{log: log, watcher: w, dd: dd, community: community, repo: repo, dataDir: dataDir, ai: aic, settings: cfg, update: upd, tlog: tlog, version: version, live: live.New(), ocr: screen.New(), ui: ui, devProxy: devProxy}
+	s := &Server{log: log, watcher: w, dd: dd, community: community, repo: repo, dataDir: dataDir, ai: aic, settings: cfg, update: upd, tlog: tlog, version: version, live: live.New(), ocr: screen.New(), ui: ui, devProxy: devProxy}
+	s.startHotkeys()
+	return s
 }
 
 // Handler builds the router.
@@ -67,6 +73,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/game/pick", s.correctPick)
 	mux.HandleFunc("POST /api/game/pick-slot", s.pickSlot)
 	mux.HandleFunc("POST /api/game/scan", s.scanNow)
+	mux.HandleFunc("POST /api/hotkeys", s.setHotkeys)
+	mux.HandleFunc("POST /api/hotkeys/fire", s.fireHotkeyHTTP)
 	mux.HandleFunc("GET /api/ai/research", s.aiResearch)
 	mux.HandleFunc("GET /api/champions/{key}/augment-build", s.augmentBuild)
 	mux.HandleFunc("POST /api/logs/open", s.openLogs)

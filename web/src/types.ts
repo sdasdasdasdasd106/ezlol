@@ -256,4 +256,5 @@ export interface Game {
   ocr: string
   ocrLang: string
   research?: Research
+  needAdmin?: boolean // the game runs as administrator and ezlol does not: hotkeys cannot reach it
 }

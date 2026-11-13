@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -144,6 +145,9 @@ func (s *Server) syncGame(live *liveResponse) (off *augmentOffer, status, why st
 		st.chosen = 0
 		st.aiManualAt = time.Time{}
 		s.tlog.Log("game", map[string]any{"champion": me.Champion.Name, "championId": me.Champion.ID, "gameTime": live.GameTime, "level": me.Level, "started": live.Started})
+		// Start the text reader now (PowerShell takes a few seconds to start),
+		// so the first scan key press of the game is answered quickly.
+		go func() { _, _ = s.ocr.ReadDump(context.Background(), "") }()
 	}
 	st.lastGT = live.GameTime
 	st.champName = me.Champion.Name
@@ -421,43 +425,71 @@ func manualLevel(level int) int {
 	return lv
 }
 
-// scanNow: POST /api/game/scan — the player pressed the "read the augments
-// now" hotkey (or the button in the window). This is the only time the
-// screen is captured. One capture, and two or more names on screen count
-// straight away: the player says the choice is open. When the names cannot
-// be matched and AI option C is on, the text goes to the AI and its answer
-// becomes the offer (see takeManualAI).
+// scanNow: POST /api/game/scan {"wait": bool} — the button in the window.
+// wait: the game is in exclusive fullscreen and minimized while the player
+// clicks; the capture waits until they are back in the game.
 func (s *Server) scanNow(w http.ResponseWriter, r *http.Request) {
-	live, err := s.liveState(r.Context())
+	var body struct {
+		Wait bool `json:"wait"`
+	}
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 256)).Decode(&body)
+	code, out := s.doScan(r.Context(), body.Wait)
+	writeJSON(w, code, out)
+}
+
+// doScan reads the augment choice on screen now: the scan hotkey or the
+// button. This is the only time the screen is captured. One capture, and two
+// or more names on screen count straight away: the player says the choice is
+// open. When the names cannot be matched and AI option C is on, the text goes
+// to the AI and its answer becomes the offer (see takeManualAI). It returns an
+// HTTP status and a body; errors carry "error".
+func (s *Server) doScan(ctx context.Context, wait bool) (int, map[string]any) {
+	fail := func(code int, msg string) (int, map[string]any) { return code, map[string]any{"error": msg} }
+	if wait && !screen.GameVisible() {
+		t0 := time.Now()
+		for !screen.GameVisible() {
+			if time.Since(t0) > 15*time.Second {
+				return fail(409, "没等到游戏画面：点完「立即识别」后 15 秒内切回游戏")
+			}
+			select {
+			case <-ctx.Done():
+				return fail(499, "取消了")
+			case <-time.After(300 * time.Millisecond):
+			}
+		}
+		time.Sleep(900 * time.Millisecond) // let the game draw again after switching back
+	}
+	live, err := s.liveState(ctx)
 	if err != nil {
-		writeErr(w, 502, "读不到游戏数据："+err.Error())
-		return
+		return fail(502, "读不到游戏数据："+err.Error())
 	}
 	if !live.InGame {
-		writeErr(w, 409, "现在不在游戏里")
-		return
+		return fail(409, "现在不在游戏里")
 	}
 	st := &s.offer
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if _, _, why, stop := s.syncGame(live); stop {
-		writeErr(w, 409, why)
-		return
+		return fail(409, why)
 	}
 	if st.pending == 0 {
 		st.pending, st.pendingAt = manualLevel(live.Me.Level), time.Now()
 	}
 	stage := stageOf(st.pending)
-	od, err := s.loadOfferData(r.Context(), live)
+	od, err := s.loadOfferData(ctx, live)
 	if err != nil {
-		writeErr(w, 502, err.Error())
-		return
+		return fail(502, err.Error())
 	}
-	rd, err := s.readScreen(r.Context(), od, fmt.Sprintf("lv%d-key", st.pending))
+	rd, err := s.readScreen(ctx, od, fmt.Sprintf("lv%d-key", st.pending))
+	// The text reader (PowerShell) starts on first use: wait for it rather
+	// than make the player press again.
+	for t0 := time.Now(); err != nil && strings.Contains(err.Error(), "正在启动") && time.Since(t0) < 40*time.Second; {
+		time.Sleep(time.Second)
+		rd, err = s.readScreen(ctx, od, fmt.Sprintf("lv%d-key", st.pending))
+	}
 	if err != nil {
 		s.tlog.Log("scan", map[string]any{"mode": "aram", "trigger": "manual", "level": st.pending, "stage": stage, "error": err.Error(), "capture": s.ocr.Capture(), "ms": rd.ms, "gameTime": live.GameTime})
-		writeErr(w, 409, "截屏识别失败："+err.Error())
-		return
+		return fail(409, "截屏识别失败："+err.Error())
 	}
 	names := rd.names(od)
 	ok := len(rd.ids) >= 2
@@ -466,23 +498,20 @@ func (s *Server) scanNow(w http.ResponseWriter, r *http.Request) {
 	if ok {
 		sig := fmt.Sprint(rd.ids)
 		fresh := st.last == nil || !st.last.Active || st.last.sig != sig
-		off := s.showOffer(r.Context(), live, od, rd.ids, "ocr", fresh, "manual")
-		writeJSON(w, 200, map[string]any{"status": "ok", "best": off.Best, "names": names, "ms": rd.ms})
-		return
+		off := s.showOffer(ctx, live, od, rd.ids, "ocr", fresh, "manual")
+		return 200, map[string]any{"status": "ok", "best": off.Best, "names": names, "ms": rd.ms}
 	}
 	// Fewer than two names: let the AI read the text, if allowed.
 	if s.aiOn("text") {
 		if st.aiRunning || s.startTextRead(rd.lines, od.names, "manual") {
 			st.aiManualAt = st.aiAt
-			writeJSON(w, 202, map[string]any{"status": "ai", "names": names, "message": fmt.Sprintf("只认出 %d 个强化名，AI 正在根据文字推断（几秒）…", len(names))})
-			return
+			return 202, map[string]any{"status": "ai", "names": names, "message": fmt.Sprintf("只认出 %d 个强化名，AI 正在根据文字推断（几秒）…", len(names))}
 		}
 	}
-	msg := "屏幕中间没读到强化卡片：请在强化选择界面打开时再按"
 	if len(names) == 1 {
-		msg = fmt.Sprintf("只认出「%s」一个强化，请等卡片完全显示后再按一次", names[0])
+		return fail(409, fmt.Sprintf("只认出「%s」一个强化，请等卡片完全显示后再按一次", names[0]))
 	}
-	writeErr(w, 409, msg)
+	return fail(409, "屏幕中间没读到强化卡片：请在强化选择界面打开时再按")
 }
 
 // takeManualAI turns the AI's reading of a manual scan into the offer once
@@ -553,40 +582,47 @@ func (s *Server) pickSlot(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Slot int `json:"slot"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256)).Decode(&body); err != nil || body.Slot < 1 || body.Slot > 3 {
-		writeErr(w, 400, "slot 必须是 1、2 或 3")
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256)).Decode(&body); err != nil {
+		writeErr(w, 400, "请求格式不对")
 		return
+	}
+	code, out := s.doPick(body.Slot)
+	writeJSON(w, code, out)
+}
+
+// doPick marks slot 1..3 (left to right) as the augment taken; see pickSlot.
+func (s *Server) doPick(slot int) (int, map[string]any) {
+	fail := func(code int, msg string) (int, map[string]any) { return code, map[string]any{"error": msg} }
+	if slot < 1 || slot > 3 {
+		return fail(400, "slot 必须是 1、2 或 3")
 	}
 	st := &s.offer
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	if st.last != nil && st.last.Active && body.Slot <= len(st.last.Screen) {
+	if st.last != nil && st.last.Active && slot <= len(st.last.Screen) {
 		name := ""
 		for _, c := range st.last.Offered {
-			if c.ID == st.last.Screen[body.Slot-1] {
+			if c.ID == st.last.Screen[slot-1] {
 				name = c.Name
 			}
 		}
-		st.chosen = body.Slot
-		s.tlog.Log("pick-slot", map[string]any{"slot": body.Slot, "augment": name, "during": "offer"})
+		st.chosen = slot
+		s.tlog.Log("pick-slot", map[string]any{"slot": slot, "augment": name, "during": "offer"})
 		s.closeOffer()
-		writeJSON(w, 200, map[string]any{"slot": body.Slot, "augment": name, "picks": st.picks})
-		return
+		return 200, map[string]any{"slot": slot, "augment": name, "picks": st.picks}
 	}
 	if len(st.picks) == 0 {
-		writeErr(w, 404, "现在没有可以标记的强化")
-		return
+		return fail(404, "现在没有可以标记的强化：先按识别键识别")
 	}
 	p := &st.picks[len(st.picks)-1]
-	if body.Slot > len(p.Offered) {
-		writeErr(w, 400, "没有这个位置")
-		return
+	if slot > len(p.Offered) {
+		return fail(400, "没有这个位置")
 	}
-	a := p.Offered[body.Slot-1]
+	a := p.Offered[slot-1]
 	from := p.Name
 	p.AugmentID, p.Name, p.Icon, p.Rarity, p.Assumed = a.ID, a.Name, a.Icon, a.Rarity, false
 	s.tlog.Log("pick-corrected", map[string]any{"stage": p.Stage, "from": from, "to": a.Name, "augmentId": a.ID, "via": "hotkey"})
-	writeJSON(w, 200, map[string]any{"slot": body.Slot, "augment": a.Name, "picks": st.picks})
+	return 200, map[string]any{"slot": slot, "augment": a.Name, "picks": st.picks}
 }
 
 func pickNames(ps []augPick) []string {
