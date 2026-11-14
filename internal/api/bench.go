@@ -154,7 +154,7 @@ func adviseBench(in benchInput) benchAdvice {
 	if best != nil && best.WinRate-cur.WinRate >= benchSwapMargin {
 		out.Kind = "swap"
 		out.Target = best.Champion.ID
-		out.Verdict = fmt.Sprintf("建议换成 %s：胜率 %s，比你现在的 %s 高 %.1f%%", best.Champion.Name, pct1(best.WinRate), name, (best.WinRate-cur.WinRate)*100)
+		out.Verdict = fmt.Sprintf("建议换成 %s：胜率 %s，比你现在的 %s 高 %.1f 个百分点", best.Champion.Name, pct1(best.WinRate), name, (best.WinRate-cur.WinRate)*100)
 		if best.points() < benchNewPoints && best.recent() < benchNewGames && cur.points() >= benchKnownPoints {
 			out.Note = fmt.Sprintf("不过你没怎么玩过 %s，%s 你更熟", best.Champion.Name, name)
 		}
@@ -178,7 +178,7 @@ func adviseBench(in benchInput) benchAdvice {
 	out.Kind = "keep"
 	out.Verdict = "留着 " + name + " 就行，板凳上没有明显更好的"
 	if best != nil && best.WinRate > cur.WinRate {
-		out.Verdict += fmt.Sprintf("（%s 只高 %.1f%%）", best.Champion.Name, (best.WinRate-cur.WinRate)*100)
+		out.Verdict += fmt.Sprintf("（%s 只高 %.1f 个百分点）", best.Champion.Name, (best.WinRate-cur.WinRate)*100)
 	}
 	return out
 }

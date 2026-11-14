@@ -34,7 +34,7 @@ func TestBenchSuggestsBetterChampion(t *testing.T) {
 	if a.Kind != "swap" || a.Target != 3 {
 		t.Fatalf("kind %q target %d, want swap to 3", a.Kind, a.Target)
 	}
-	if a.Verdict != "建议换成 蕾欧娜：胜率 54.1%，比你现在的 艾希 高 3.2%" {
+	if a.Verdict != "建议换成 蕾欧娜：胜率 54.1%，比你现在的 艾希 高 3.2 个百分点" {
 		t.Fatalf("verdict %q", a.Verdict)
 	}
 	if got := order(a); len(got) != 3 || got[0] != 3 || got[1] != 1 || got[2] != 2 {
@@ -75,7 +75,7 @@ func TestBenchGapTooSmall(t *testing.T) {
 	if a.Kind != "keep" || a.Target != 0 {
 		t.Fatalf("kind %q target %d, want keep", a.Kind, a.Target)
 	}
-	if !strings.HasPrefix(a.Verdict, "留着 艾希 就行，板凳上没有明显更好的") || !strings.Contains(a.Verdict, "安妮 只高 1.1%") {
+	if !strings.HasPrefix(a.Verdict, "留着 艾希 就行，板凳上没有明显更好的") || !strings.Contains(a.Verdict, "安妮 只高 1.1 个百分点") {
 		t.Fatalf("verdict %q", a.Verdict)
 	}
 	if a.Rows[0].Champion.ID != 2 {
