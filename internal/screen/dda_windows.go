@@ -105,50 +105,95 @@ func (c *ddaCapturer) loop() {
 	if win.IsValidDpiAwarenessContext(win.DpiAwarenessContextPerMonitorAwareV2) {
 		_, _ = win.SetThreadDpiAwarenessContext(win.DpiAwarenessContextPerMonitorAwareV2)
 	}
-	device, deviceCtx, err := d3d11.NewD3D11Device()
-	if err != nil {
-		for req := range c.reqs {
-			req.resp <- ddaResp{err: fmt.Errorf("d3d11 device: %w", err)}
-		}
-		return
-	}
-	outputs := map[uint]*ddaOutput{}
-	open := func(i uint) (*ddaOutput, error) {
-		if o := outputs[i]; o != nil {
-			return o, nil
-		}
-		dup, err := outputduplication.NewIDXGIOutputDuplication(device, deviceCtx, i)
-		if err != nil {
-			return nil, err
-		}
-		b, err := dup.GetBounds()
-		if err != nil {
-			dup.Release()
-			return nil, err
-		}
-		o := &ddaOutput{dup: dup, bounds: b}
-		outputs[i] = o
-		return o, nil
-	}
-	drop := func(i uint) {
-		if o := outputs[i]; o != nil {
-			o.dup.Release()
-			delete(outputs, i)
-		}
-	}
+	d := &ddaDevice{outputs: map[uint]*ddaOutput{}}
 	for req := range c.reqs {
-		req.resp <- c.grab(req.target, open, drop)
+		req.resp <- d.grabRetrying(req.target)
 	}
 }
 
-func (c *ddaCapturer) grab(target image.Rectangle, open func(uint) (*ddaOutput, error), drop func(uint)) ddaResp {
+// ddaDevice is the D3D device and the duplicated outputs, rebuilt when they break.
+type ddaDevice struct {
+	device  *d3d11.ID3D11Device
+	ctx     *d3d11.ID3D11DeviceContext
+	outputs map[uint]*ddaOutput
+}
+
+func (d *ddaDevice) open(i uint) (*ddaOutput, error) {
+	if d.device == nil {
+		dev, ctx, err := d3d11.NewD3D11Device()
+		if err != nil {
+			return nil, fmt.Errorf("d3d11 device: %w", err)
+		}
+		d.device, d.ctx = dev, ctx
+	}
+	if o := d.outputs[i]; o != nil {
+		return o, nil
+	}
+	dup, err := outputduplication.NewIDXGIOutputDuplication(d.device, d.ctx, i)
+	if err != nil {
+		return nil, err
+	}
+	b, err := dup.GetBounds()
+	if err != nil {
+		dup.Release()
+		return nil, err
+	}
+	o := &ddaOutput{dup: dup, bounds: b}
+	d.outputs[i] = o
+	return o, nil
+}
+
+func (d *ddaDevice) drop(i uint) {
+	if o := d.outputs[i]; o != nil {
+		o.dup.Release()
+		delete(d.outputs, i)
+	}
+}
+
+// reset releases everything; the next open starts from a new device.
+func (d *ddaDevice) reset() {
+	for i := range d.outputs {
+		d.drop(i)
+	}
+	if d.ctx != nil {
+		d.ctx.Release()
+	}
+	if d.device != nil {
+		d.device.Release()
+	}
+	d.device, d.ctx = nil, nil
+}
+
+// grabRetrying captures, reopening what broke. Switching out of an exclusive-
+// fullscreen game and back (to read the recommendation, then reroll) makes
+// Windows revoke the duplication: the next capture fails with "access lost".
+// Reopen at once and capture again rather than fail this scan; if reopening
+// keeps failing, start over with a new device.
+func (d *ddaDevice) grabRetrying(target image.Rectangle) ddaResp {
+	var r ddaResp
+	for attempt := 0; attempt < 4; attempt++ {
+		if attempt == 2 {
+			d.reset()
+		}
+		if attempt > 0 {
+			time.Sleep(time.Duration(150*attempt) * time.Millisecond)
+		}
+		r = d.grab(target)
+		if r.err == nil {
+			return r
+		}
+	}
+	return r
+}
+
+func (d *ddaDevice) grab(target image.Rectangle) ddaResp {
 	// Find the monitor the game is on (by the window's centre); else the first one.
 	var out *ddaOutput
 	var idx uint
 	var firstErr error
 	center := image.Pt((target.Min.X+target.Max.X)/2, (target.Min.Y+target.Max.Y)/2)
 	for i := uint(0); i < 6; i++ {
-		o, err := open(i)
+		o, err := d.open(i)
 		if err != nil {
 			if firstErr == nil {
 				firstErr = err
@@ -173,10 +218,11 @@ func (c *ddaCapturer) grab(target image.Rectangle, open func(uint) (*ddaOutput, 
 			break
 		}
 		if !errors.Is(err, outputduplication.ErrNoImageYet) {
-			// Lost access (resolution change, fullscreen switch, UAC prompt): reopen next time.
-			drop(idx)
+			// Lost access (alt-tab out of fullscreen, resolution change, UAC prompt): reopen.
+			d.drop(idx)
 			return ddaResp{err: err}
 		}
+		// Nothing changed on screen since the last frame we took: it is still current.
 		if out.last != nil {
 			img, err = out.last, nil
 			break

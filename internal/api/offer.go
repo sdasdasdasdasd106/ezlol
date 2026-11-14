@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -482,10 +483,18 @@ func (s *Server) doScan(ctx context.Context, wait bool) (int, map[string]any) {
 		return fail(502, err.Error())
 	}
 	rd, err := s.readScreen(ctx, od, fmt.Sprintf("lv%d-key", st.pending))
-	// The text reader (PowerShell) starts on first use: wait for it rather
-	// than make the player press again.
-	for t0 := time.Now(); err != nil && strings.Contains(err.Error(), "正在启动") && time.Since(t0) < 40*time.Second; {
-		time.Sleep(time.Second)
+	// The text reader (PowerShell) starts on first use, and a capture can fail
+	// for a moment right after switching back into a fullscreen game: try
+	// again rather than make the player press again.
+	retries := 0
+	for t0 := time.Now(); err != nil && time.Since(t0) < 40*time.Second; {
+		starting := strings.Contains(err.Error(), "正在启动")
+		passing := strings.Contains(err.Error(), "暂时失败") || errors.Is(err, screen.ErrBlack)
+		if !starting && !(passing && retries < 3) {
+			break
+		}
+		retries++
+		time.Sleep(500 * time.Millisecond)
 		rd, err = s.readScreen(ctx, od, fmt.Sprintf("lv%d-key", st.pending))
 	}
 	if err != nil {

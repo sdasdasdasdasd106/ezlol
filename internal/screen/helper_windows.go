@@ -42,6 +42,7 @@ type psHelper struct {
 	dda      *ddaCapturer
 	ddaOff   bool // Desktop Duplication does not work here: GDI only
 	ddaFails int  // consecutive Desktop Duplication failures
+	ddaOffN  int  // consecutive scans without a D3D11 device
 }
 
 func windowsHelper() func(ctx context.Context, dump string) ([]byte, error) {
@@ -245,13 +246,20 @@ func (h *psHelper) ddaCommand(target image.Rectangle, dump string) (cmd, note st
 	if h.ddaOff {
 		return "", "dda-off"
 	}
-	img, area, err := h.dda.capture(target, 3*time.Second)
+	img, area, err := h.dda.capture(target, 5*time.Second)
 	if err != nil {
-		if strings.Contains(err.Error(), "d3d11 device") || strings.Contains(err.Error(), "no output") {
-			h.ddaOff = true // will not work on this machine (e.g. remote desktop)
+		// Only a machine without a D3D11 device (remote desktop, no GPU
+		// driver) never works; anything else can be passing (a fullscreen
+		// switch), so Desktop Duplication is tried again on the next scan.
+		if strings.Contains(err.Error(), "d3d11 device") {
+			h.ddaOffN++
+			if h.ddaOffN >= 3 {
+				h.ddaOff = true
+			}
 		}
 		return "", "dda-error: " + err.Error()
 	}
+	h.ddaOffN = 0
 	if IsBlack(img) {
 		return "", "dda-black"
 	}
