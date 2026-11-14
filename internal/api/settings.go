@@ -15,8 +15,6 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	m["ocrAvailable"] = s.ocr.Available()
 	m["ocrLang"] = s.ocr.Lang()
 	m["logDir"] = s.tlog.Dir()
-	m["uploadRepo"] = s.repo
-	m["lastUpload"] = s.lastUpload()
 	m["aiUsage"] = s.ai.Usage.Snapshot()
 	m["version"] = s.version
 	writeJSON(w, 200, m)
@@ -29,8 +27,6 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		UpdateCheck *bool   `json:"updateCheck"`
 		TestLog     *bool   `json:"testLog"`
 		LogShots    *bool   `json:"logShots"`
-		GitHubToken *string `json:"githubToken"`
-		AutoUpload  *bool   `json:"autoUpload"`
 		DeepSeekKey *string `json:"deepseekKey"`
 		AIReview    *bool   `json:"aiReview"`
 		AIResearch  *bool   `json:"aiResearch"`
@@ -52,12 +48,6 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.LogShots != nil {
 			st.LogShots = *body.LogShots
-		}
-		if body.GitHubToken != nil {
-			st.GitHubToken = strings.TrimSpace(*body.GitHubToken)
-		}
-		if body.AutoUpload != nil {
-			st.AutoUpload = *body.AutoUpload
 		}
 		if body.DeepSeekKey != nil {
 			st.DeepSeekKey = strings.TrimSpace(*body.DeepSeekKey)

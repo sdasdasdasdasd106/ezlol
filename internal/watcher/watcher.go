@@ -15,19 +15,44 @@ import (
 
 // Status is a snapshot of what the watcher knows.
 type Status struct {
-	Connected      bool      `json:"connected"`
-	Phase          string    `json:"phase"`
-	Summoner       string    `json:"summoner"`
-	GameVersion    string    `json:"gameVersion"`
-	Patch          string    `json:"patch"`
-	QueueID        int       `json:"queueId"`
-	QueueName      string    `json:"queueName"`
-	MapID          int       `json:"mapId"`
-	GameMode       string    `json:"gameMode"`
-	PickedChampion int       `json:"pickedChampion"`
-	PickedPosition string    `json:"pickedPosition"`
-	Error          string    `json:"error,omitempty"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	Connected      bool   `json:"connected"`
+	Phase          string `json:"phase"`
+	Summoner       string `json:"summoner"`
+	GameVersion    string `json:"gameVersion"`
+	Patch          string `json:"patch"`
+	QueueID        int    `json:"queueId"`
+	QueueName      string `json:"queueName"`
+	MapID          int    `json:"mapId"`
+	GameMode       string `json:"gameMode"`
+	PickedChampion int    `json:"pickedChampion"`
+	PickedPosition string `json:"pickedPosition"`
+	// ChampSelect is the bench and rerolls during champion select, nil otherwise.
+	ChampSelect *ChampSelectState `json:"champSelect,omitempty"`
+	Error       string            `json:"error,omitempty"`
+	UpdatedAt   time.Time         `json:"updatedAt"`
+}
+
+// ChampSelectState is what champion select offers besides your own champion.
+type ChampSelectState struct {
+	BenchEnabled bool  `json:"benchEnabled"`
+	Bench        []int `json:"bench"` // champion ids, client order
+	// Rerolls left; -1 when the client does not report it.
+	Rerolls int `json:"rerolls"`
+}
+
+func (a *ChampSelectState) equal(b *ChampSelectState) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if a.BenchEnabled != b.BenchEnabled || a.Rerolls != b.Rerolls || len(a.Bench) != len(b.Bench) {
+		return false
+	}
+	for i := range a.Bench {
+		if a.Bench[i] != b.Bench[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // LogEntry is a user-visible event line.
@@ -202,6 +227,7 @@ func (w *Watcher) tick(ctx context.Context) {
 		next.Connected = false
 		next.Phase = ""
 		next.PickedChampion = 0
+		next.ChampSelect = nil
 		w.addLog("warn", "lost connection to League client")
 		w.setStatus(next, prev)
 		return
@@ -225,16 +251,30 @@ func (w *Watcher) tick(ctx context.Context) {
 	}
 
 	if phase == "ChampSelect" {
-		if id, pos, err := c.ChampSelectPick(ctx); err == nil {
+		// One read of the session gives the pick plus the bench and rerolls.
+		if cs, err := c.ChampSelectSession(ctx); err == nil {
+			id, pos := 0, ""
+			next.ChampSelect = nil
+			if cs != nil {
+				id, pos = cs.Pick()
+				rerolls := -1
+				if cs.RerollsRemaining != nil {
+					rerolls = *cs.RerollsRemaining
+				}
+				next.ChampSelect = &ChampSelectState{BenchEnabled: cs.BenchEnabled, Bench: cs.BenchIDs(), Rerolls: rerolls}
+			}
 			if id != next.PickedChampion && id != 0 {
 				w.addLog("info", "champ select pick detected")
 			}
 			next.PickedChampion = id
 			next.PickedPosition = pos
 		}
-	} else if phase != "InProgress" {
-		next.PickedChampion = 0
-		next.PickedPosition = ""
+	} else {
+		next.ChampSelect = nil
+		if phase != "InProgress" {
+			next.PickedChampion = 0
+			next.PickedPosition = ""
+		}
 	}
 
 	w.setStatus(next, prev)
@@ -252,7 +292,8 @@ func (w *Watcher) setStatus(next, prev Status) {
 func statusChanged(a, b Status) bool {
 	if a.Connected != b.Connected || a.Phase != b.Phase || a.Error != b.Error ||
 		a.PickedChampion != b.PickedChampion || a.PickedPosition != b.PickedPosition ||
-		a.Summoner != b.Summoner || a.Patch != b.Patch || a.QueueID != b.QueueID || a.MapID != b.MapID {
+		a.Summoner != b.Summoner || a.Patch != b.Patch || a.QueueID != b.QueueID || a.MapID != b.MapID ||
+		!a.ChampSelect.equal(b.ChampSelect) {
 		return true
 	}
 	return false

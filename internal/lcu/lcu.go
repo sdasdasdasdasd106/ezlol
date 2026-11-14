@@ -245,33 +245,12 @@ func (c *Client) GameVersion(ctx context.Context) (string, error) {
 // ChampSelectPick returns the champion id the local player has picked or hovered
 // in champ select, 0 when not in champ select.
 func (c *Client) ChampSelectPick(ctx context.Context) (int, string, error) {
-	var sess struct {
-		LocalPlayerCellID int `json:"localPlayerCellId"`
-		MyTeam            []struct {
-			CellID             int    `json:"cellId"`
-			ChampionID         int    `json:"championId"`
-			ChampionPickIntent int    `json:"championPickIntent"`
-			AssignedPosition   string `json:"assignedPosition"`
-		} `json:"myTeam"`
-	}
-	err := c.Get(ctx, "/lol-champ-select/v1/session", &sess)
-	var apiErr *APIError
-	if errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound {
-		return 0, "", nil
-	}
-	if err != nil {
+	sess, err := c.ChampSelectSession(ctx)
+	if err != nil || sess == nil {
 		return 0, "", err
 	}
-	for _, m := range sess.MyTeam {
-		if m.CellID == sess.LocalPlayerCellID {
-			id := m.ChampionID
-			if id == 0 {
-				id = m.ChampionPickIntent
-			}
-			return id, strings.ToUpper(m.AssignedPosition), nil
-		}
-	}
-	return 0, "", nil
+	id, pos := sess.Pick()
+	return id, pos, nil
 }
 
 // RecommendedPage is one of Riot's in-client recommended rune pages.
@@ -334,8 +313,9 @@ func (c *Client) Session(ctx context.Context) (*GameflowSession, error) {
 type ChampSelect struct {
 	LocalPlayerCellID int  `json:"localPlayerCellId"`
 	BenchEnabled      bool `json:"benchEnabled"`
-	RerollsRemaining  int  `json:"rerollsRemaining"`
-	BenchChampions    []struct {
+	// RerollsRemaining is nil when the session does not carry it.
+	RerollsRemaining *int `json:"rerollsRemaining"`
+	BenchChampions   []struct {
 		ChampionID int `json:"championId"`
 	} `json:"benchChampions"`
 	MyTeam []struct {
@@ -357,6 +337,32 @@ type ChampSelect struct {
 		Phase                   string `json:"phase"`
 	} `json:"timer"`
 	Trades []Trade `json:"trades"`
+}
+
+// Pick returns the local player's champion (the pick, else the hovered intent)
+// and assigned position; 0 when the player has none yet.
+func (s *ChampSelect) Pick() (int, string) {
+	for _, m := range s.MyTeam {
+		if m.CellID == s.LocalPlayerCellID {
+			id := m.ChampionID
+			if id == 0 {
+				id = m.ChampionPickIntent
+			}
+			return id, strings.ToUpper(m.AssignedPosition)
+		}
+	}
+	return 0, ""
+}
+
+// BenchIDs lists the champions on the ARAM bench, in client order.
+func (s *ChampSelect) BenchIDs() []int {
+	out := make([]int, 0, len(s.BenchChampions))
+	for _, b := range s.BenchChampions {
+		if b.ChampionID != 0 {
+			out = append(out, b.ChampionID)
+		}
+	}
+	return out
 }
 
 // ChampSelectSession returns the champ select session, or nil when not in one.

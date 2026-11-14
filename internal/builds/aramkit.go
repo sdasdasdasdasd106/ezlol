@@ -193,6 +193,43 @@ func (c *Community) AramkitChampion(ctx context.Context, champID int) (*AKChampi
 	}, nil
 }
 
+// ChampRate is a champion's overall record in one data set.
+type ChampRate struct {
+	Games   int
+	WinRate float64
+}
+
+// AramkitChampionRates returns every champion's overall ARAM Mayhem record
+// (champion id -> games and win rate) from aramkit's champion ranking, one
+// file for all champions, plus the data version.
+func (c *Community) AramkitChampionRates(ctx context.Context) (map[int]ChampRate, string, error) {
+	path, ver, err := c.aramkitPath(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	url := fmt.Sprintf("%s%s/stats/all/champion-rankings.json", aramkitBase, path)
+	b, err := c.fetch(ctx, fmt.Sprintf("aramkit-%s-champ-rankings.json", ver), url, 6*time.Hour)
+	if err != nil {
+		return nil, "", err
+	}
+	var raw struct {
+		Rows []AKStat `json:"rows"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return nil, "", fmt.Errorf("aramkit champion rankings: %w", err)
+	}
+	out := make(map[int]ChampRate, len(raw.Rows))
+	for _, r := range raw.Rows {
+		if r.ID != 0 && r.Games > 0 {
+			out[r.ID] = ChampRate{Games: r.Games, WinRate: r.WinRate}
+		}
+	}
+	if len(out) == 0 {
+		return nil, "", fmt.Errorf("aramkit champion rankings: empty")
+	}
+	return out, ver, nil
+}
+
 // AramkitAugmentBuilds returns, per augment, what this champion built after taking it.
 // The source file is several MB, so parsed results for the last few champions stay in memory.
 func (c *Community) AramkitAugmentBuilds(ctx context.Context, champID int) (map[int]*AKAugmentBuild, error) {
