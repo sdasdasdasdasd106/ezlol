@@ -1,5 +1,5 @@
 'use strict'
-const { app, BrowserWindow, shell, Menu, ipcMain, Notification, Tray, nativeImage, globalShortcut } = require('electron')
+const { app, BrowserWindow, shell, Menu, ipcMain, Notification, Tray, nativeImage, globalShortcut, screen } = require('electron')
 const { spawn } = require('node:child_process')
 const path = require('node:path')
 const fs = require('node:fs')
@@ -41,7 +41,9 @@ const OLD_HOTKEY_DEFAULTS = { pick1: 'CommandOrControl+Shift+1', pick2: 'Command
 // voice: speak the recommendation (optional; League runs in exclusive
 // fullscreen, so nothing can be shown over it: the player switches out to the
 // window, or listens).
-const APP_SETTINGS_DEFAULTS = { launchAtLogin: false, startInTray: false, voice: false, hotkeys: HOTKEY_DEFAULTS }
+// side / sidePos: the small panel at the side of the screen during a game.
+const SIDE_POSITIONS = ['left', 'right']
+const APP_SETTINGS_DEFAULTS = { launchAtLogin: false, startInTray: false, voice: false, side: true, sidePos: 'left', hotkeys: HOTKEY_DEFAULTS }
 const appSettingsPath = () => path.join(app.getPath('userData'), 'app-settings.json')
 
 /**
@@ -183,7 +185,8 @@ function updateTray() {
 }
 function setAppSettings(patch) {
   const clean = {}
-  for (const k of ['launchAtLogin', 'startInTray', 'voice']) if (patch && typeof patch[k] === 'boolean') clean[k] = patch[k]
+  for (const k of ['launchAtLogin', 'startInTray', 'voice', 'side']) if (patch && typeof patch[k] === 'boolean') clean[k] = patch[k]
+  if (patch && SIDE_POSITIONS.includes(patch.sidePos)) clean.sidePos = patch.sidePos
   if (patch && patch.hotkeys && typeof patch.hotkeys === 'object') {
     const hk = { ...appSettings.hotkeys }
     for (const k of Object.keys(HOTKEY_DEFAULTS)) {
@@ -205,13 +208,90 @@ function setAppSettings(patch) {
   applyLoginItem()
   updateTray()
   registerHotkeys()
+  updateSide()
   const view = appSettingsView()
   if (win) win.webContents.send('app-settings', view)
+  if (sideWin) sideWin.webContents.send('app-settings', view)
   return view
 }
 ipcMain.handle('app-settings:get', () => appSettingsView())
 
 let hotkeyErrors = []
+
+// ---- Side panel: a small always-on-top window at the side of the screen ----
+// Shows the augment recommendation and the next item during a game, so the
+// player does not have to switch out. It never takes focus and lets clicks
+// through (a focused window would pull a fullscreen game out of fullscreen),
+// and it is left out of screen captures so its text is never read as cards.
+// Over a borderless or windowed game it is always visible; over exclusive
+// fullscreen only when Windows' fullscreen optimizations are on.
+const SIDE_W = 320
+let sideWin = null
+let sideWant = false
+let sideHeight = 200
+let sidePreviewUntil = 0
+
+function createSide() {
+  sideWin = new BrowserWindow({
+    width: SIDE_W,
+    height: sideHeight,
+    show: false,
+    frame: false,
+    transparent: false,
+    backgroundColor: '#16191f',
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    focusable: false,
+    alwaysOnTop: true,
+    hasShadow: false,
+    title: 'ezlol',
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false },
+  })
+  sideWin.setAlwaysOnTop(true, 'screen-saver')
+  sideWin.setIgnoreMouseEvents(true)
+  sideWin.setContentProtection(true) // opaque window: reliably left out of captures
+  sideWin.loadURL(`${URL}/?side=1`)
+  sideWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  sideWin.on('closed', () => (sideWin = null))
+}
+
+function updateSide() {
+  if (!sideWin) return
+  const show = Date.now() < sidePreviewUntil || (appSettings.side && sideWant)
+  if (!show) {
+    if (sideWin.isVisible()) sideWin.hide()
+    return
+  }
+  // Full display bounds: a fullscreen game covers the taskbar.
+  const d = screen.getPrimaryDisplay().bounds
+  const h = Math.max(60, Math.min(Math.round(d.height * 0.8), sideHeight))
+  const m = 12
+  const x = appSettings.sidePos === 'right' ? d.x + d.width - SIDE_W - m : d.x + m
+  sideWin.setBounds({ x, y: Math.round(d.y + (d.height - h) / 2), width: SIDE_W, height: h })
+  if (!sideWin.isVisible()) sideWin.showInactive()
+  // Re-assert (about once a second): a game going fullscreen can push it behind.
+  sideWin.setAlwaysOnTop(true, 'screen-saver')
+  sideWin.moveTop()
+}
+
+ipcMain.on('side:want', (e, want, height) => {
+  if (!sideWin || e.sender !== sideWin.webContents) return
+  sideWant = !!want
+  if (height > 0) sideHeight = Math.round(height)
+  updateSide()
+})
+ipcMain.handle('side:preview', () => {
+  if (!sideWin) createSide()
+  sidePreviewUntil = Date.now() + 8000
+  sideWin.webContents.send('side:preview')
+  setTimeout(updateSide, 300)
+  setTimeout(updateSide, 8100)
+  return true
+})
 
 ipcMain.handle('voice:test', () => {
   if (win) win.webContents.send('voice:say', '语音播报正常。推荐中间的，大法师。', true)
@@ -390,7 +470,7 @@ function createWindow(show = true) {
   })
   win.on('closed', () => {
     win = null
-    // Closing the window quits ezlol
+    // Closing the window quits ezlol (the side panel is a window too)
     // (tray mode keeps running hidden instead, see 'close' above).
     if (process.platform !== 'darwin' && !app.isQuitting) {
       app.isQuitting = true
@@ -546,6 +626,8 @@ app.whenReady().then(async () => {
   applyLoginItem()
   updateTray()
   registerHotkeys()
+  createSide()
+  screen.on('display-metrics-changed', updateSide)
   setupUpdates()
   app.on('activate', () => showWindow())
 })

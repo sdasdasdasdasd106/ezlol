@@ -20,7 +20,7 @@ const dialog = ref<HTMLElement | null>(null)
 // Desktop-only settings live in the Electron shell; absent in a plain browser.
 const desktop = !!window.ezlol?.getAppSettings
 const appS = ref<AppSettings | null>(null)
-async function saveApp(patch: Partial<Pick<AppSettings, 'launchAtLogin' | 'startInTray' | 'voice' | 'hotkeys'>>) {
+async function saveApp(patch: Partial<Pick<AppSettings, 'launchAtLogin' | 'startInTray' | 'voice' | 'side' | 'sidePos' | 'hotkeys'>>) {
   if (!window.ezlol?.setAppSettings) return
   busy.value = true
   try {
@@ -106,6 +106,10 @@ async function resetHotkeys() {
   }
 }
 const defaultKeys = Object.values(DEFAULT_HOTKEYS).map(prettyHotkey).join('、')
+async function previewSide() {
+  await window.ezlol?.previewSide?.()
+  flash('侧边小窗预览 8 秒', 'ok')
+}
 async function testVoice() {
   await window.ezlol?.testVoice?.()
   flash('正在试听', 'ok')
@@ -537,10 +541,29 @@ onBeforeUnmount(() => {
 
             <h3>游戏内快捷键</h3>
             <p class="muted lead">
-              游戏是独占全屏，ezlol 不往游戏上叠窗口：按快捷键识别后，切出来（Alt+Tab）在这个窗口看推荐；也可以打开语音，不用切出来。
+              按快捷键识别后，推荐会显示在屏幕侧边的小窗里；看不到小窗时，切出来（Alt+Tab）在这个窗口看，或者打开语音。
               ezlol 直接读键盘和鼠标的按键状态（和 OBS 的快捷键一样），全屏游戏里也能用；如果英雄联盟是以管理员身份运行的，ezlol 也要以管理员身份运行。
             </p>
             <dl class="rows">
+              <div class="setting">
+                <dt>
+                  <span class="lbl"><label id="set-lbl-side" for="set-side">游戏侧边小窗</label></span>
+                  <span class="desc muted">
+                    游戏里贴在屏幕侧边：识别后显示三个选项和推荐、选它后的出装；选完显示已选强化和下一件。不挡操作（鼠标点击会穿过去），也不会被截屏识别进去。
+                    游戏用「无边框」或「窗口」模式时一定看得到；「全屏」模式下要开着 Windows 的全屏优化才看得到（看不到也不影响游戏）。
+                  </span>
+                </dt>
+                <dd>
+                  <select :value="appS.sidePos" aria-label="小窗位置" @change="saveApp({ sidePos: ($event.target as HTMLSelectElement).value as 'left' | 'right' })">
+                    <option value="left">左侧</option>
+                    <option value="right">右侧</option>
+                  </select>
+                  <button type="button" @click="previewSide">预览</button>
+                  <button id="set-side" type="button" role="switch" class="toggle" :class="{ on: appS.side }" :aria-checked="appS.side" aria-labelledby="set-lbl-side" :disabled="busy" @click="saveApp({ side: !appS.side })">
+                    <span class="track" aria-hidden="true" /><span class="state">{{ appS.side ? '开' : '关' }}</span>
+                  </button>
+                </dd>
+              </div>
               <div class="setting">
                 <dt>
                   <span class="lbl"><label id="set-lbl-voice" for="set-voice">语音播报（可选）</label></span>

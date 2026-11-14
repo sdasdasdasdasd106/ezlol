@@ -16,4 +16,10 @@ contextBridge.exposeInMainWorld('ezlol', {
   resetHotkeys: () => ipcRenderer.invoke('hotkeys:defaults'),
   testVoice: () => ipcRenderer.invoke('voice:test'),
   onSay: (fn) => ipcRenderer.on('voice:say', (_e, text, force) => fn(String(text), !!force)),
+  previewSide: () => ipcRenderer.invoke('side:preview'),
+  // Used by the side panel window only.
+  side: {
+    want: (show, height) => ipcRenderer.send('side:want', !!show, Number(height) || 0),
+    onPreview: (fn) => ipcRenderer.on('side:preview', () => fn()),
+  },
 })

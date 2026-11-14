@@ -73,6 +73,9 @@ export interface AppSettings {
   startInTray: boolean
   /** speak the recommendation (optional) */
   voice: boolean
+  /** the small panel at the side of the screen during a game */
+  side: boolean
+  sidePos: 'left' | 'right'
   hotkeys: Hotkeys
   /** hotkeys that could not be registered (taken by another program) */
   hotkeyErrors?: string[]
@@ -90,12 +93,18 @@ declare global {
       installUpdate?: () => Promise<boolean>
       checkUpdate?: () => Promise<{ status: string; version?: string; error?: string; progress?: number }>
       getAppSettings?: () => Promise<AppSettings>
-      setAppSettings?: (patch: Partial<Pick<AppSettings, 'launchAtLogin' | 'startInTray' | 'voice' | 'hotkeys'>>) => Promise<AppSettings>
+      setAppSettings?: (patch: Partial<Pick<AppSettings, 'launchAtLogin' | 'startInTray' | 'voice' | 'side' | 'sidePos' | 'hotkeys'>>) => Promise<AppSettings>
       onAppSettings?: (fn: (s: AppSettings) => void) => void
       suspendHotkeys?: (on: boolean) => Promise<AppSettings>
       resetHotkeys?: () => Promise<AppSettings>
       testVoice?: () => Promise<boolean>
       onSay?: (fn: (text: string, force: boolean) => void) => void
+      previewSide?: () => Promise<boolean>
+      /** Only inside the side panel window. */
+      side?: {
+        want: (show: boolean, height: number) => void
+        onPreview: (fn: () => void) => void
+      }
     }
   }
 }
