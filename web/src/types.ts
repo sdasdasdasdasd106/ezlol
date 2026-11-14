@@ -10,8 +10,46 @@ export interface Status {
   gameMode: string
   pickedChampion: number
   pickedPosition: string
+  /** bench and rerolls during champion select */
+  champSelect?: ChampSelectState | null
   error?: string
   updatedAt: string
+}
+
+export interface ChampSelectState {
+  benchEnabled: boolean
+  /** champion ids on the bench, client order */
+  bench: number[] | null
+  /** rerolls left, -1 unknown */
+  rerolls: number
+}
+
+/** One champion in the bench advice: yours or a bench one. */
+export interface BenchRow {
+  champion: Champion
+  current: boolean
+  hasData: boolean
+  winRate: number
+  games: number
+  /** no data or too few games: never recommended */
+  lowSample: boolean
+  mastery?: Mastery
+  record?: PlayRecord
+}
+
+/** GET /api/champ-select/bench: your champion and the bench by win rate, and what to do. */
+export interface BenchAdvice {
+  active: boolean
+  benchEnabled: boolean
+  rows: BenchRow[]
+  kind: '' | 'swap' | 'keep' | 'reroll' | 'empty' | 'unsure'
+  verdict: string
+  note?: string
+  target?: number
+  source: '' | 'aramkit' | 'opgg'
+  patch?: string
+  average: number
+  rerolls: number
 }
 
 export interface Champion {

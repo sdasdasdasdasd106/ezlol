@@ -1,4 +1,4 @@
-import type { AugBuildResponse, AugPick, ChampPitfall, Pitfall, Build, Champion, Research, ChampionInfo, Game, Mastery, PlayRecord, SettingsView, Status, UpdateInfo } from './types'
+import type { AugBuildResponse, AugPick, BenchAdvice, ChampPitfall, Pitfall, Build, Champion, Research, ChampionInfo, Game, Mastery, PlayRecord, SettingsView, Status, UpdateInfo } from './types'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...init })
@@ -32,6 +32,8 @@ export const api = {
   checkUpdate: () => req<UpdateInfo>('/api/update/check', { method: 'POST' }),
   mastery: () => req<Record<string, Mastery>>('/api/mastery'),
   me: (championId: number) => req<{ mastery: Mastery | null; record: PlayRecord | null; mode: string }>(`/api/me/${championId}`),
+  /** Champion select: your champion and the bench by win rate, and whether to swap or reroll (advice only). */
+  bench: () => req<BenchAdvice>('/api/champ-select/bench'),
 }
 
 /** Live client status over SSE (connection, phase, queue, picked champion). */

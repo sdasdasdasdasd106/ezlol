@@ -10,3 +10,24 @@ func TestShortPatch(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 }
+
+func TestStatusChangedOnBench(t *testing.T) {
+	a := Status{Phase: "ChampSelect", ChampSelect: &ChampSelectState{BenchEnabled: true, Bench: []int{1, 2}, Rerolls: 1}}
+	b := a
+	b.ChampSelect = &ChampSelectState{BenchEnabled: true, Bench: []int{1, 2}, Rerolls: 1}
+	if statusChanged(a, b) {
+		t.Fatal("same bench reported as a change")
+	}
+	b.ChampSelect = &ChampSelectState{BenchEnabled: true, Bench: []int{1, 3}, Rerolls: 1}
+	if !statusChanged(a, b) {
+		t.Fatal("bench swap not reported")
+	}
+	b.ChampSelect = &ChampSelectState{BenchEnabled: true, Bench: []int{1, 2}, Rerolls: 0}
+	if !statusChanged(a, b) {
+		t.Fatal("reroll not reported")
+	}
+	b.ChampSelect = nil
+	if !statusChanged(a, b) {
+		t.Fatal("leaving champ select not reported")
+	}
+}

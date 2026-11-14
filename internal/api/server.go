@@ -86,6 +86,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/update", s.getUpdate)
 	mux.HandleFunc("POST /api/update/check", s.checkUpdate)
 	mux.HandleFunc("GET /api/mastery", s.mastery)
+	mux.HandleFunc("GET /api/champ-select/bench", s.champSelectBench)
 	mux.HandleFunc("GET /api/champions/{key}/info", s.championInfo)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeErr(w, 404, "not found") })
 

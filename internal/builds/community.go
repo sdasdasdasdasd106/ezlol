@@ -142,6 +142,22 @@ func (c *Community) ARAMBuild(ctx context.Context, d *ddragon.Data, champ ddrago
 	return c.opggBuild(ctx, d, champ, url, fmt.Sprintf("opgg-aram-%d.json", champ.ID))
 }
 
+// ARAMChampionRate returns a champion's overall record in normal ARAM (not
+// Mayhem) from op.gg, read from the same file as ARAMBuild, plus its patch.
+func (c *Community) ARAMChampionRate(ctx context.Context, champID int) (ChampRate, string, error) {
+	url := fmt.Sprintf("https://lol-api-champion.op.gg/api/global/champions/aram/%d/none?tier=all", champID)
+	b, err := c.fetch(ctx, fmt.Sprintf("opgg-aram-%d.json", champID), url, 3*time.Hour)
+	if err != nil {
+		return ChampRate{}, "", err
+	}
+	var r opggResponse
+	if err := json.Unmarshal(b, &r); err != nil {
+		return ChampRate{}, "", fmt.Errorf("op.gg: %w", err)
+	}
+	st := r.Data.Summary.AverageStats
+	return ChampRate{Games: st.Play, WinRate: st.WinRate}, r.Meta.Version, nil
+}
+
 func (c *Community) opggBuild(ctx context.Context, d *ddragon.Data, champ ddragon.Champion, url, cache string) (*Build, error) {
 	b, err := c.fetch(ctx, cache, url, 3*time.Hour)
 	if err != nil {

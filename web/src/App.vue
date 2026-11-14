@@ -7,6 +7,7 @@ import * as sound from './sound'
 import type { Champion, Game, Status } from './types'
 import BuildPanel from './components/BuildPanel.vue'
 import ChampionBar from './components/ChampionBar.vue'
+import BenchBar from './components/BenchBar.vue'
 import AugmentAssist from './components/AugmentAssist.vue'
 import AugmentBuild from './components/AugmentBuild.vue'
 import StrategyCard from './components/StrategyCard.vue'
@@ -62,12 +63,23 @@ watch(error, (e) => e && toast({ key: 'app-error', kind: 'error', title: 'ezlol'
 
 let unsub: (() => void) | null = null
 
+// A bench champion clicked in champion select: shown until your own champion
+// changes (swap, reroll, lock), then following resumes.
+const previewing = ref(false)
 function onStatus(s: Status) {
+  const prevPick = status.value?.pickedChampion
   status.value = s
-  if (followPick.value && s.pickedChampion) {
+  if (previewing.value && (s.pickedChampion !== prevPick || s.phase !== 'ChampSelect')) previewing.value = false
+  if (followPick.value && s.pickedChampion && !previewing.value) {
     const c = champions.value.find((x) => x.id === s.pickedChampion)
     if (c && selected.value?.id !== c.id) selected.value = c
   }
+}
+function previewBench(id: number) {
+  const c = champions.value.find((x) => x.id === id)
+  if (!c) return
+  previewing.value = id !== status.value?.pickedChampion
+  selected.value = c
 }
 
 // In-game poll: your champion (the build follows it) and the augment offer.
@@ -215,6 +227,7 @@ function select(c: Champion) {
     <!-- Fixed bar, never part of the grid below: the champion card (picker as a dropdown) -->
     <div class="bars">
       <ChampionBar :champion="selected" :champions="champions" :status="status" :screen="mode" :compact="mode === 'game'" v-model:follow="followPick" @select="select" />
+      <BenchBar v-if="mode === 'select'" :status="status" :selected-id="selected?.id" @preview="previewBench" />
     </div>
 
     <div class="layout" :class="mode">
