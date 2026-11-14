@@ -25,8 +25,6 @@ export const api = {
     req<AugBuildResponse>(`/api/champions/${champion}/augment-build?augments=${augments.join(',')}&owned=${owned.join(',')}`),
   openLogs: () => req<{ dir: string }>('/api/logs/open', { method: 'POST' }),
   aiResearch: (champion: number, start = false) => req<Research | { status: 'off' }>(`/api/ai/research?champion=${champion}${start ? '&start=1' : ''}`),
-  // testing aid: push the logs to the repository's test-logs branch
-  uploadLogs: () => req<{ uploaded: number; skipped: number; url: string }>('/api/logs/upload', { method: 'POST' }),
   info: (key: string) => req<{ champion: Champion; info?: ChampionInfo }>(`/api/champions/${encodeURIComponent(key)}/info`),
   settings: () => req<SettingsView>('/api/settings'),
   saveSettings: (patch: Record<string, unknown>) => req<SettingsView>('/api/settings', { method: 'PUT', body: JSON.stringify(patch) }),

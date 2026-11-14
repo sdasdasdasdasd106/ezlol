@@ -56,7 +56,6 @@ func (s *Server) game(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 502, err.Error())
 		return
 	}
-	s.noteInGame(resp.InGame)
 	if !resp.InGame {
 		writeJSON(w, 200, resp)
 		return

@@ -239,12 +239,6 @@ export interface SettingsView {
   testLog: boolean
   logShots: boolean
   logDir: string
-  // testing aid: log upload to GitHub
-  githubTokenSet: boolean
-  githubTokenHint: string
-  autoUpload: boolean
-  uploadRepo: string
-  lastUpload?: { at: string; why: string; uploaded: number; skipped: number; url: string; error?: string } | null
   deepseekKeySet: boolean
   deepseekKeyHint: string
   aiReview: boolean

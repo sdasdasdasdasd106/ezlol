@@ -218,28 +218,6 @@ const AI_TOGGLES: { key: 'aiReview' | 'aiResearch' | 'aiText'; label: string; de
   { key: 'aiResearch', label: 'B. 联网整理英雄攻略', desc: '进游戏后 AI 联网搜索这个英雄的乱斗玩法，结合胜率数据写一份攻略，A 复核时也会参考。每个英雄每个版本一次，不到 1 美分。' },
   { key: 'aiText', label: 'C. 识别不准时让 AI 根据文字推断', desc: '屏幕读到了文字但对不上强化名（错字、漏字）时，把识别出的文字发给 AI 推断是哪几个强化。只发文字，不发截图。每次不到 0.1 美分。' },
 ]
-const ghToken = ref('')
-const uploading = ref(false)
-async function saveToken() {
-  if (!ghToken.value) return
-  if (await save({ githubToken: ghToken.value })) ghToken.value = ''
-}
-async function uploadNow() {
-  uploading.value = true
-  try {
-    const r = await api.uploadLogs()
-    flash(`已上传 ${r.uploaded} 个文件`, 'ok')
-  } catch (e) {
-    flash(errText(e), 'err')
-  } finally {
-    uploading.value = false
-    try {
-      s.value = await api.settings()
-    } catch {
-      /* ignore */
-    }
-  }
-}
 
 async function openLogs() {
   try {
@@ -408,53 +386,6 @@ onBeforeUnmount(() => {
               <dd class="usage">
                 <b>${{ s.aiUsage.usd.toFixed(4) }}</b>
                 <span class="muted">{{ s.aiUsage.calls }} 次对话 · {{ s.aiUsage.searches }} 次搜索 · {{ (s.aiUsage.tokens / 1000).toFixed(1) }}k tokens</span>
-              </dd>
-            </div>
-          </dl>
-
-          <!-- Testing aid: upload logs to GitHub (remove after testing) -->
-          <h3>上传日志到 GitHub（测试用）</h3>
-          <p class="muted lead">
-            把日志和最近 15 张截图上传到仓库 <code>{{ s.uploadRepo }}</code> 的 <code>test-logs</code> 分支，方便直接查看测试结果（不会触发打包）。
-            需要一个只对这个仓库有写权限的令牌：打开
-            <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer">GitHub 新建令牌</a>，
-            「Repository access」选 Only select repositories → ezlol，「Permissions → Contents」选 Read and write，生成后粘贴到下面。
-            令牌只存在本机，只发给 GitHub。测试结束后可以在 GitHub 上删掉这个令牌。
-          </p>
-          <dl class="rows">
-            <div class="setting wide">
-              <dt>
-                <span class="lbl">
-                  <label for="set-ghtok">GitHub 令牌</label>
-                  <span class="badge" :class="{ riot: s.githubTokenSet }">{{ s.githubTokenSet ? `已设置 ${s.githubTokenHint}` : '未设置' }}</span>
-                </span>
-              </dt>
-              <dd>
-                <input id="set-ghtok" v-model="ghToken" type="password" class="key" placeholder="github_pat_…" autocomplete="off" spellcheck="false" @keydown.enter.prevent="saveToken" />
-                <button type="button" class="primary" :disabled="busy || !ghToken" @click="saveToken">保存</button>
-                <button type="button" class="danger" :disabled="busy || !s.githubTokenSet" @click="save({ githubToken: '' })">清除</button>
-              </dd>
-            </div>
-            <div class="setting">
-              <dt>
-                <span class="lbl"><label id="set-lbl-autoup" for="set-autoup">每局结束自动上传</label></span>
-                <span class="desc muted">游戏结束几秒后自动上传，不用手动点。</span>
-              </dt>
-              <dd>
-                <button id="set-autoup" type="button" role="switch" class="toggle" :class="{ on: s.autoUpload }" :aria-checked="s.autoUpload" aria-labelledby="set-lbl-autoup" :disabled="!s.githubTokenSet" @click="save({ autoUpload: !s.autoUpload })">
-                  <span class="track" aria-hidden="true" /><span class="state">{{ s.autoUpload ? '开' : '关' }}</span>
-                </button>
-              </dd>
-            </div>
-            <div class="setting">
-              <dt>
-                <span class="lbl">上次上传</span>
-                <span v-if="s.lastUpload?.error" class="desc warn">{{ s.lastUpload.at }}：{{ s.lastUpload.error }}</span>
-                <span v-else-if="s.lastUpload" class="desc muted">{{ s.lastUpload.at }}：上传 {{ s.lastUpload.uploaded }} 个，未变化 {{ s.lastUpload.skipped }} 个</span>
-                <span v-else class="desc muted">还没上传过</span>
-              </dt>
-              <dd>
-                <button type="button" :disabled="uploading || !s.githubTokenSet" @click="uploadNow">{{ uploading ? '上传中…' : '立即上传' }}</button>
               </dd>
             </div>
           </dl>

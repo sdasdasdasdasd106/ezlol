@@ -41,11 +41,9 @@ type Server struct {
 	info      infoCache
 	ocr       *screen.Reader
 	tlog      *testlog.Logger
-	repo      string // owner/name of this build's GitHub repository (log uploads)
 	dataDir   string
 	ai        *ai.Client
 	aiSt      aiState
-	upload    uploadState
 	offer     offerState
 	keys      *hotkey.Watcher
 	hk        hotkeyState
@@ -56,9 +54,9 @@ type Server struct {
 }
 
 // New wires a server.
-func New(log *slog.Logger, w *watcher.Watcher, dd *ddragon.Store, community *builds.Community, cfg *settings.Store, upd *update.Checker, tlog *testlog.Logger, dataDir, repo, version string, ui fs.FS, devProxy string) *Server {
+func New(log *slog.Logger, w *watcher.Watcher, dd *ddragon.Store, community *builds.Community, cfg *settings.Store, upd *update.Checker, tlog *testlog.Logger, dataDir, version string, ui fs.FS, devProxy string) *Server {
 	aic := newAIClient(dataDir, func() string { return cfg.Get().DeepSeekKey })
-	s := &Server{log: log, watcher: w, dd: dd, community: community, repo: repo, dataDir: dataDir, ai: aic, settings: cfg, update: upd, tlog: tlog, version: version, live: live.New(), ocr: screen.New(), ui: ui, devProxy: devProxy}
+	s := &Server{log: log, watcher: w, dd: dd, community: community, dataDir: dataDir, ai: aic, settings: cfg, update: upd, tlog: tlog, version: version, live: live.New(), ocr: screen.New(), ui: ui, devProxy: devProxy}
 	s.startHotkeys()
 	return s
 }
@@ -82,7 +80,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/ai/research", s.aiResearch)
 	mux.HandleFunc("GET /api/champions/{key}/augment-build", s.augmentBuild)
 	mux.HandleFunc("POST /api/logs/open", s.openLogs)
-	mux.HandleFunc("POST /api/logs/upload", s.uploadLogs)
 	mux.HandleFunc("GET /api/me/{id}", s.meChampion)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
